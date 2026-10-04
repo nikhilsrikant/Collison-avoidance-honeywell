@@ -1,0 +1,3030 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Traffic Escape Display</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=B612:wght@400;700&family=B612+Mono:wght@400;700&display=swap">
+<style>
+/* Layout: full-bleed 3D synthetic-vision scene with cockpit-style panels floating at the edges; panels stack under the scene on phones.
+   Single dark theme on purpose: cockpit displays are dark, and the alert colors (cyan, amber, red, green, magenta) follow avionics conventions. */
+:root {
+  --bg: #070b10;
+  --panel: rgba(8, 13, 19, 0.86);
+  --panel-solid: #0b1219;
+  --line: #1d2b38;
+  --line-strong: #2c3f50;
+  --ink: #e6edf2;
+  --muted: #8ea3b2;
+  --faint: #5d7282;
+  --cyan: #3fd0e8;
+  --green: #3ddc84;
+  --amber: #ffb627;
+  --red: #ff4d4d;
+  --magenta: #e45cf0;
+  --font-ui: "B612", "Segoe UI", system-ui, sans-serif;
+  --font-num: "B612 Mono", ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+[hidden] { display: none !important; }
+html, body { height: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font-family: var(--font-ui); font-size: 13px; overflow: hidden; }
+button, select, input { font: inherit; color: inherit; }
+#app { position: relative; width: 100%; height: 100%; display: flex; flex-direction: column; }
+.bar { position: relative; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; padding: 8px 16px; background: var(--panel-solid); border-bottom: 1px solid var(--line); }
+.brand { display: flex; align-items: baseline; gap: 10px; margin-right: 6px; }
+.brand b { font-size: 14px; letter-spacing: 0.06em; text-transform: uppercase; }
+.brand span { color: var(--muted); font-size: 12px; }
+.ctl { display: flex; align-items: center; gap: 6px; }
+.ctl label { color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+select { background: #0f1820; border: 1px solid var(--line-strong); border-radius: 4px; padding: 5px 8px; }
+.seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: 4px; overflow: hidden; }
+.seg button { background: transparent; border: 0; padding: 5px 9px; cursor: pointer; color: var(--muted); }
+.seg button + button { border-left: 1px solid var(--line-strong); }
+.seg button[aria-pressed="true"] { background: #16303b; color: var(--cyan); }
+.btn { background: #0f1820; border: 1px solid var(--line-strong); border-radius: 4px; padding: 5px 11px; cursor: pointer; }
+.btn:hover { border-color: var(--cyan); }
+.btn.primary { background: #0f3a2b; border-color: #2d8a5f; color: #d8ffe9; }
+.btn.primary:hover { border-color: var(--green); }
+button:focus-visible, select:focus-visible, input:focus-visible { outline: 2px solid var(--cyan); outline-offset: 1px; }
+.check { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); cursor: pointer; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 8px; border-radius: 3px; border: 1px solid var(--line-strong); color: var(--muted); font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; white-space: nowrap; }
+.chip i { width: 8px; height: 8px; border-radius: 50%; background: var(--faint); display: inline-block; }
+.chip.ok i { background: var(--green); } .chip.warn i { background: var(--amber); } .chip.bad i { background: var(--red); }
+.spacer { flex: 1; }
+
+#stage { position: relative; flex: 1; min-height: 0; }
+#scene { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+.panel { position: absolute; z-index: 3; background: var(--panel); border: 1px solid var(--line); border-radius: 6px; backdrop-filter: blur(4px); }
+.panel h3 { margin: 0; padding: 7px 10px 6px; font-size: 10.5px; font-weight: 700; letter-spacing: 0.12em; text-transform: uppercase; color: var(--muted); border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 8px; }
+.panel h3 .r { margin-left: auto; font-weight: 400; letter-spacing: 0.04em; text-transform: none; }
+
+#mapPanel { left: 16px; top: 14px; width: 232px; }
+#rawPanel { left: 16px; top: 300px; width: 232px; }
+#camCtl { position: absolute; z-index: 4; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 4px; }
+#camCtl button { width: 38px; height: 38px; border-radius: 6px; border: 1px solid var(--line-strong); background: var(--panel-solid); color: var(--ink); font-family: var(--font-num); font-size: 18px; cursor: pointer; }
+#camCtl button:hover { border-color: var(--cyan); color: var(--cyan); }
+#camCtl button.wide { font-size: 10px; letter-spacing: 0.04em; }
+#camHint { position: absolute; z-index: 4; right: 64px; bottom: 18px; color: var(--muted); font-size: 11px; background: var(--panel); padding: 4px 8px; border-radius: 4px; pointer-events: none; transition: opacity 0.6s; }
+@media (max-width: 760px) { #camCtl { top: 8px; bottom: auto; } #camHint { display: none; } }
+#liveBadge { font-family: var(--font-num); font-size: 11px; letter-spacing: 0.08em; padding: 3px 8px; border-radius: 3px; border: 1px solid var(--line-strong); color: var(--muted); }
+#liveBadge.on { color: #06210f; background: var(--green); border-color: var(--green); font-weight: 700; }
+#offlineStrip { position: relative; z-index: 6; padding: 8px 16px; background: rgba(255, 77, 77, 0.18); border-bottom: 1px solid var(--red); color: #ffd6d6; font-size: 12.5px; line-height: 1.45; }
+#offlineStrip code { font-family: var(--font-num); background: rgba(0,0,0,0.35); padding: 1px 5px; border-radius: 3px; color: #fff; }
+#offlineStrip[hidden] { display: none; }
+#rawPanel[hidden] { display: none; }
+#app.tabletop.rawmode #mapPanel { display: none; }
+#app.tabletop.rawmode #rawPanel { top: 14px; }
+#rawPanel .big { padding: 8px 10px 2px; font-family: var(--font-num); font-size: 30px; color: var(--green); font-variant-numeric: tabular-nums; }
+#rawPanel .big.near { color: var(--amber); } #rawPanel .big.none { color: var(--faint); font-size: 20px; }
+#rawPanel .small { padding: 0 10px 6px; color: var(--muted); font-size: 11px; font-family: var(--font-num); }
+#rawSpark { display: block; width: 232px; height: 70px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+#rawPanel dl { margin: 0; padding: 7px 10px 9px; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; font-size: 11.5px; }
+#rawPanel dt { color: var(--muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; padding-top: 1px; }
+#rawPanel dd { margin: 0; font-family: var(--font-num); color: var(--ink); }
+#rawPanel dd.bad { color: var(--red); } #rawPanel dd.warn { color: var(--amber); } #rawPanel dd.ok { color: var(--green); }
+#plan { display: block; width: 232px; height: 232px; }
+#ownPanel { left: 16px; bottom: 16px; width: 232px; }
+.readouts { display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line); }
+.ro { background: var(--panel-solid); padding: 6px 10px; }
+.ro small { display: block; color: var(--muted); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
+.ro b { font-family: var(--font-num); font-size: 17px; font-variant-numeric: tabular-nums; color: var(--green); font-weight: 400; }
+.help { padding: 7px 10px 9px; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.help kbd { font-family: var(--font-num); font-size: 10.5px; border: 1px solid var(--line-strong); border-radius: 3px; padding: 0 4px; color: var(--ink); }
+
+#alertPanel { right: 16px; top: 14px; width: 330px; }
+#banner { padding: 10px 12px; display: grid; gap: 3px; border-bottom: 1px solid var(--line); }
+#banner .state { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; font-weight: 700; }
+#banner .msg { font-family: var(--font-num); font-size: 16px; line-height: 1.3; }
+#banner .sub { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+#wfBox { border-bottom: 1px solid var(--line); padding: 8px 10px 9px; display: grid; gap: 7px; font-size: 11.5px; }
+#wfBox[hidden] { display: none; }
+#wfBox .wf-steps { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; }
+#wfBox .wf-steps span { text-align: center; padding: 4px 2px; border-radius: 3px; border: 1px solid var(--line-strong); color: var(--faint); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+#wfBox .wf-steps span.on { color: #1a0d00; background: var(--amber); border-color: var(--amber); }
+#wfBox .wf-steps span.on.red { color: #fff; background: rgba(255, 77, 77, 0.85); border-color: var(--red); }
+#wfBox .wf-steps span.on.mag { color: #1a0620; background: var(--magenta); border-color: var(--magenta); }
+#wfBox .wf-steps span.done { color: var(--green); border-color: rgba(61, 220, 132, 0.5); }
+#wfBox dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 3px 10px; }
+#wfBox dt { color: var(--muted); font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; padding-top: 1px; }
+#wfBox dd { margin: 0; font-family: var(--font-num); color: var(--ink); line-height: 1.35; }
+#wfBox .wf-btns { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+#wfBox .btn.ack { background: #3a2a0a; border-color: var(--amber); color: #ffe2a8; font-weight: 700; }
+#wfBox .btn.ack.urgent { background: var(--red); border-color: var(--red); color: #fff; }
+#wfBox .btn.apon { background: #2a1236; border-color: var(--magenta); color: #f6d4ff; }
+#wfBox .wf-log { font-family: var(--font-num); font-size: 10.5px; color: var(--muted); max-height: 64px; overflow: auto; white-space: pre-wrap; }
+#banner.clear .state { color: var(--green); }
+#banner.traffic { background: rgba(255, 182, 39, 0.12); } #banner.traffic .state, #banner.traffic .msg { color: var(--amber); }
+#banner.escape { background: rgba(255, 77, 77, 0.16); } #banner.escape .state { color: var(--red); } #banner.escape .msg { color: #fff; }
+#banner.escape .msg em { font-style: normal; color: var(--green); }
+.matrix { display: grid; grid-template-columns: 54px repeat(3, 1fr); gap: 4px; padding: 10px; }
+.matrix .hd { color: var(--muted); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; display: flex; align-items: center; justify-content: center; }
+.matrix .rh { justify-content: flex-start; }
+.cell { min-height: 44px; border-radius: 4px; border: 1px solid var(--line-strong); background: #0d151c; display: grid; place-content: center; text-align: center; gap: 1px; padding: 3px 2px; font-family: var(--font-num); font-size: 11.5px; color: var(--faint); position: relative; }
+.cell small { font-family: var(--font-ui); font-size: 9.5px; letter-spacing: 0.04em; }
+.cell.safe { background: rgba(61, 220, 132, 0.16); border-color: rgba(61, 220, 132, 0.55); color: #c9f7dc; }
+.cell.caution { background: rgba(255, 182, 39, 0.14); border-color: rgba(255, 182, 39, 0.5); color: #ffe2a8; }
+.cell.unsafe { background: rgba(255, 77, 77, 0.16); border-color: rgba(255, 77, 77, 0.55); color: #ffc6c6; }
+.cell.best { outline: 2px solid var(--magenta); outline-offset: 1px; }
+.cell.best::after { content: "BEST"; position: absolute; top: -8px; right: 4px; font-family: var(--font-ui); font-size: 8.5px; letter-spacing: 0.1em; background: var(--magenta); color: #1a0620; padding: 0 4px; border-radius: 2px; }
+.matrix.idle .cell { opacity: 0.45; }
+.legend { display: flex; flex-wrap: wrap; gap: 10px; padding: 0 10px 10px; color: var(--muted); font-size: 10.5px; }
+.legend span::before { content: ""; display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
+.legend .s::before { background: var(--green); } .legend .c::before { background: var(--amber); } .legend .u::before { background: var(--red); } .legend .b::before { background: var(--magenta); }
+
+#trafficPanel { right: 16px; bottom: 16px; width: 330px; max-height: 34%; display: flex; flex-direction: column; }
+.tblwrap { overflow: auto; min-height: 0; }
+table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+th { text-align: left; color: var(--muted); font-weight: 400; font-size: 10px; letter-spacing: 0.08em; text-transform: uppercase; padding: 5px 8px; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel-solid); }
+td { padding: 5px 8px; border-bottom: 1px solid rgba(29, 43, 56, 0.6); font-family: var(--font-num); font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.why { font-family: var(--font-ui); color: var(--muted); white-space: normal; font-size: 10.5px; }
+tr.lvl2 td:first-child { color: var(--amber); } tr.lvl3 td:first-child { color: var(--red); } tr.lvl1 td:first-child, tr.lvl0 td:first-child { color: var(--cyan); }
+tr.pick { cursor: pointer; } tr.pick:hover td { background: rgba(63, 208, 232, 0.08); }
+
+#infoPanel { left: 264px; right: 362px; bottom: 16px; padding: 9px 12px; display: grid; gap: 4px; }
+#infoPanel .t { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+#infoPanel .t b { font-size: 13px; }
+#infoPanel .t span { color: var(--muted); font-family: var(--font-num); font-size: 12px; }
+#infoPanel p { margin: 0; color: var(--muted); line-height: 1.45; max-width: 68ch; font-size: 12px; }
+#tcasNote { color: var(--amber); font-size: 11.5px; }
+
+#result { position: absolute; z-index: 6; left: 50%; top: 18%; transform: translateX(-50%); width: min(460px, calc(100% - 32px)); background: rgba(7, 11, 16, 0.94); border: 1px solid var(--line-strong); border-radius: 8px; padding: 16px 18px; display: grid; gap: 10px; }
+#result h2 { margin: 0; font-size: 20px; letter-spacing: 0.04em; }
+#result.bad h2 { color: var(--red); } #result.warn h2 { color: var(--amber); } #result.good h2 { color: var(--green); }
+#result dl { margin: 0; display: grid; grid-template-columns: auto 1fr; gap: 4px 14px; font-size: 12.5px; }
+#result dt { color: var(--muted); } #result dd { margin: 0; font-family: var(--font-num); }
+#result .row { display: flex; gap: 8px; flex-wrap: wrap; }
+
+#resultsDrawer { position: absolute; z-index: 7; left: 16px; right: 16px; bottom: 16px; max-height: 60%; display: flex; flex-direction: column; }
+#resultsDrawer .sum { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1px; background: var(--line); }
+#resultsDrawer .sum div { background: var(--panel-solid); padding: 8px 10px; font-size: 12px; line-height: 1.5; }
+#resultsDrawer .sum b { display: block; font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); font-weight: 400; }
+#resultsDrawer .actions { display: flex; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--line); flex-wrap: wrap; align-items: center; }
+#csvBox { width: 100%; height: 70px; background: #0b1117; color: var(--ink); border: 1px solid var(--line); font-family: var(--font-num); font-size: 11px; }
+
+#banner.auto { background: rgba(228, 92, 240, 0.18); } #banner.auto .state { color: var(--magenta); } #banner.auto .msg { color: #fff; } #banner.auto .msg em { font-style: normal; color: var(--green); }
+#autoBar { height: 5px; background: #2a1f30; border-radius: 3px; overflow: hidden; margin-top: 4px; }
+#autoBar i { display: block; height: 100%; width: 0%; background: var(--magenta); }
+.lights { display: flex; align-items: center; gap: 10px; padding: 8px 10px 10px; border-top: 1px solid var(--line); }
+.lights svg { flex: none; }
+.lights .lt { display: grid; gap: 4px; min-width: 0; }
+.lights .lt b { font-size: 10.5px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); font-weight: 700; }
+.lights .lt span#lightsText { font-family: var(--font-num); font-size: 12.5px; color: var(--ink); line-height: 1.35; }
+.lights .seg button { padding: 2px 8px; font-size: 11px; }
+#trafficCard { left: 50%; transform: translateX(-50%); bottom: 16px; width: min(600px, calc(100% - 32px)); padding: 10px 14px 12px; display: grid; gap: 8px; }
+#trafficCard .tc-head { display: flex; align-items: baseline; gap: 10px; }
+#trafficCard .tc-head b { font-size: 15px; } #trafficCard .tc-head span { color: var(--muted); font-family: var(--font-num); }
+.tc-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
+.tc-grid small { display: block; color: var(--muted); font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; }
+.tc-grid b { font-family: var(--font-num); font-size: 17px; font-weight: 400; font-variant-numeric: tabular-nums; color: var(--cyan); }
+.tc-next { color: var(--muted); font-size: 12px; }
+.tt-only { display: none; }
+#app.tabletop .tt-only { display: inline-flex; }
+#app.tabletop .sim-only { display: none; }
+#app.pilot #ownPanel, #app.pilot #trafficPanel, #app.pilot #infoPanel, #app.pilot .matrix, #app.pilot .legend { display: none !important; }
+#app.pilot #alertPanel { left: 50%; right: auto; transform: translateX(-50%); width: min(600px, calc(100% - 32px)); }
+#app.pilot #banner { padding: 12px 16px; }
+#app.pilot #banner .msg { font-size: 22px; }
+#app.pilot #banner .state { font-size: 12px; }
+@media (max-width: 1100px) { #app.pilot #mapPanel { display: none; } }
+@media (max-width: 760px) {
+  #app.pilot #alertPanel, #trafficCard { transform: none; width: auto; }
+  .tc-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+#countdown { position: absolute; z-index: 6; left: 50%; top: 40%; transform: translate(-50%, -50%); font-family: var(--font-num); font-size: 64px; color: var(--cyan); text-shadow: 0 2px 18px rgba(0,0,0,0.6); pointer-events: none; }
+#flash { position: absolute; inset: 0; z-index: 2; pointer-events: none; box-shadow: inset 0 0 0 0 rgba(255, 77, 77, 0); transition: box-shadow 0.3s; }
+#flash.on { box-shadow: inset 0 0 0 6px rgba(255, 77, 77, 0.75); }
+#flash.amber { box-shadow: inset 0 0 0 4px rgba(255, 182, 39, 0.6); }
+#nogl { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); padding: 24px; text-align: center; }
+
+@media (max-width: 1100px) {
+  #infoPanel { left: 16px; right: 16px; bottom: auto; top: 260px; display: none; }
+}
+@media (max-width: 760px) {
+  body { overflow: auto; }
+  #app { height: auto; min-height: 100%; }
+  #stage { flex: none; height: auto; }
+  #scene { position: relative; inset: auto; height: 56vh; min-height: 300px; }
+  #flash { bottom: auto; height: 56vh; min-height: 300px; }
+  #countdown { top: 28vh; }
+  #result { top: 8vh; }
+  .panel { position: relative; left: auto !important; right: auto !important; top: auto !important; bottom: auto !important; width: auto !important; max-height: none !important; margin: 10px 16px 0; }
+  #plan { margin: 0 auto; }
+  #mapPanel, #ownPanel, #alertPanel, #trafficPanel, #infoPanel { display: block; }
+  #panels { padding-bottom: 16px; }
+  #resultsDrawer { position: fixed; left: 8px; right: 8px; bottom: 8px; }
+}
+@media (prefers-reduced-motion: reduce) { #flash { transition: none; } }
+</style>
+
+</head>
+<body>
+<div id="app">
+  <header class="bar">
+    <div class="brand"><b>Traffic Escape Display</b><span>perceive · predict · plan</span></div>
+    <div class="ctl"><label for="scenarioSel">Scenario</label><select id="scenarioSel"></select></div>
+    <div class="ctl"><label>Mode</label>
+      <div class="seg" id="modeSeg" role="group" aria-label="Display mode">
+        <button type="button" data-mode="full" aria-pressed="true">3D + escape</button>
+        <button type="button" data-mode="tcas2d" aria-pressed="false">2D map</button>
+        <button type="button" data-mode="alert" aria-pressed="false">Alert only</button>
+      </div>
+    </div>
+    <div class="ctl sim-only">
+      <button type="button" class="btn primary" id="startBtn">Start run</button>
+      <button type="button" class="btn" id="resetBtn">Reset</button>
+      <button type="button" class="btn" id="pauseBtn">Pause</button>
+    </div>
+    <button type="button" class="btn tt-only" id="zeroBtn" title="Set both planes flat on the table, then click">Zero table</button>
+    <div class="ctl"><label for="autoSel">Auto-avoid</label>
+      <select id="autoSel">
+        <option value="backup">Backup (if pilot is late)</option>
+        <option value="always">Always (fly at once)</option>
+        <option value="off">Off</option>
+      </select>
+    </div>
+    <div class="ctl"><label for="plannerSel">Planner</label>
+      <select id="plannerSel" title="How the escape is calculated">
+        <option value="cbf">Collision-cone CBF-QP</option>
+        <option value="grid">Old 5x5 grid (compare)</option>
+      </select>
+    </div>
+    <div class="ctl"><label>Display</label>
+      <div class="seg" id="uiSeg"><button type="button" data-ui="pilot" aria-pressed="true">Pilot</button><button type="button" data-ui="engineer" aria-pressed="false">Engineer</button></div>
+    </div>
+    <div class="ctl sim-only"><label>Speed</label>
+      <div class="seg" id="speedSeg"><button type="button" data-speed="1" aria-pressed="true">1×</button><button type="button" data-speed="2" aria-pressed="false">2×</button></div>
+    </div>
+    <div class="ctl"><label>View</label>
+      <div class="seg" id="viewSeg"><button type="button" data-view="chase" aria-pressed="true">Chase</button><button type="button" data-view="overview" aria-pressed="false">Overview</button><button type="button" data-view="top" aria-pressed="false">Top</button></div>
+    </div>
+    <label class="check"><input type="checkbox" id="soundChk" checked> Voice</label>
+    <div class="spacer"></div>
+    <span id="liveBadge" title="Where the traffic on screen comes from">PRACTICE (made-up traffic)</span>
+    <span class="chip" id="feedChip" title="Live data source" hidden><i></i>ADS-B: demo data</span>
+    <span class="chip" id="stationChip" title="Physical runway station or our plane's IMU" hidden><i></i>Runway station: off</span>
+    <button type="button" class="btn" id="resultsBtn">Results <span id="runCount">0</span></button>
+  </header>
+  <div id="offlineStrip" hidden>Not connected to the board. What you see is <b>made-up practice traffic</b>, not your sensors.
+    To use the real data: in Command Prompt run <code>python demo.py</code> in the project folder, then open <code>http://localhost:8765</code> (do not double-click the .html file).</div>
+
+  <div id="stage">
+    <canvas id="scene" aria-label="3D view of your airplane, nearby traffic and terrain"></canvas>
+    <div id="flash"></div>
+    <div id="countdown" hidden></div>
+    <div id="camCtl" aria-label="Camera">
+      <button type="button" id="zoomIn" title="Zoom in (pinch out, or +)">+</button>
+      <button type="button" id="zoomOut" title="Zoom out (pinch in, or -)">&minus;</button>
+      <button type="button" id="camClose" class="wide" title="Close-up behind our plane">CLOSE</button>
+      <button type="button" id="camReset" class="wide" title="Reset the camera (double-click works too)">RESET</button>
+    </div>
+    <div id="camHint">Drag to turn the view · pinch or scroll to zoom</div>
+    <div id="panels">
+      <section class="panel" id="alertPanel" aria-live="polite">
+        <div id="banner" class="clear"><div class="state">Clear</div><div class="msg">No conflicts</div><div class="sub" id="bannerSub">Watching all traffic and terrain</div><div id="autoBar" hidden><i></i></div></div>
+        <div id="wfBox" hidden aria-live="polite">
+          <div class="wf-steps"><span id="wfS1">Traffic</span><span id="wfS2">Resolve</span><span id="wfS3">Escalate</span><span id="wfS4">Ack</span><span id="wfS5">Autopilot</span></div>
+          <dl>
+            <dt>Tau</dt><dd id="wfTau">-</dd>
+            <dt>Range</dt><dd id="wfRange">-</dd>
+            <dt>Other</dt><dd id="wfOther">-</dd>
+            <dt>Resolve</dt><dd id="wfSense">-</dd>
+            <dt>Pilot</dt><dd id="wfPilot">-</dd>
+            <dt>Filter</dt><dd id="wfPattern">-</dd>
+            <dt>Radio</dt><dd id="wfRadio">-</dd>
+          </dl>
+          <div class="wf-btns">
+            <button type="button" class="btn ack" id="wfAck" title="Keyboard: K">ACK</button>
+            <button type="button" class="btn" id="wfAp" aria-pressed="false">Autopilot: off</button>
+            <label style="color:var(--muted)">Radio loss <select id="wfLoss"><option value="0">0%</option><option value="0.5">50%</option><option value="1">100%</option></select></label>
+          </div>
+          <div class="wf-log" id="wfLog"></div>
+        </div>
+        <div class="matrix idle" id="matrix" aria-label="Escape options"></div>
+        <div class="legend"><span class="s">safe</span><span class="c">tight</span><span class="u">unsafe</span><span class="b">best</span></div>
+        <div class="lights" id="lightsStrip">
+          <svg viewBox="0 0 170 84" width="150" height="74" aria-label="Our external lights">
+            <path d="M85 6 C89 6 91 12 91 20 L91 38 L162 50 L162 56 L91 52 L90 66 L104 74 L104 78 L85 75 L66 78 L66 74 L80 66 L79 52 L8 56 L8 50 L79 38 L79 20 C79 12 81 6 85 6 Z" fill="#1b2a36" stroke="#4d6577" stroke-width="1.2"/>
+            <circle id="lgL" cx="8" cy="53" r="6" fill="#ff3b3b"/>
+            <circle id="lgR" cx="162" cy="53" r="6" fill="#33e06f"/>
+            <circle id="lgT" cx="85" cy="79" r="4.5" fill="#ffffff"/>
+            <circle id="lgTop" cx="85" cy="30" r="5" fill="#2a3a46"/>
+            <circle id="lgBot" cx="85" cy="46" r="4" fill="#2a3a46" stroke="#5d7282" stroke-dasharray="2 2"/>
+          </svg>
+          <div class="lt">
+            <b>Our lights tell other pilots</b>
+            <span id="lightsText">Normal position lights</span>
+            <span class="seg" id="styleSeg"><button type="button" data-style="B" aria-pressed="true">Blinker</button><button type="button" data-style="C" aria-pressed="false">Color</button></span>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" id="trafficCard" hidden>
+        <div class="tc-head"><b id="tcName">Other plane</b><span id="tcPos">12 o'clock</span></div>
+        <div class="tc-grid">
+          <div><small>Distance</small><b id="tcDist">-</b></div>
+          <div><small>Altitude</small><b id="tcAlt">-</b></div>
+          <div><small>Speed</small><b id="tcSpd">-</b></div>
+          <div><small>Closing</small><b id="tcClose">-</b></div>
+          <div><small>Conflict in</small><b id="tcTime">-</b></div>
+        </div>
+        <div class="tc-next" id="tcNext"></div>
+      </section>
+
+      <section class="panel" id="rawPanel" hidden aria-live="off">
+        <h3>Board · raw data <span class="r" id="rawLink">-</span></h3>
+        <div class="big none" id="rawDist">no echo</div>
+        <div class="small" id="rawDistSub">TF-Luna LiDAR · I²C range</div>
+        <canvas id="rawSpark" width="464" height="140" aria-label="Distance over the last 10 seconds"></canvas>
+        <dl>
+          <dt>IMU</dt><dd id="rawImu">-</dd>
+          <dt>Buzzer distance</dt><dd><input id="buzzCm" type="number" min="0" max="800" step="1" value="50" style="width:80px"> cm <button type="button" class="btn" id="buzzSet">Set</button></dd>
+          <dt>Buzzer</dt><dd id="rawBuzz">-</dd>
+          <dt>Board</dt><dd id="rawStage">-</dd>
+          <dt>Lines/s</dt><dd id="rawRates">-</dd>
+        </dl>
+      </section>
+      <section class="panel" id="mapPanel">
+        <h3>Traffic map <span class="r"><span class="seg" id="rangeSeg"><button type="button" data-range="3" aria-pressed="true">3 nm</button><button type="button" data-range="6" aria-pressed="false">6 nm</button></span></span></h3>
+        <canvas id="plan" width="464" height="464" aria-label="Top-down traffic map, heading up"></canvas>
+      </section>
+
+      <section class="panel" id="ownPanel">
+        <h3>Your airplane <span class="r" id="ownKind">Light airplane</span></h3>
+        <div class="readouts">
+          <div class="ro"><small>Heading</small><b id="roHdg">090°</b></div>
+          <div class="ro"><small>Altitude</small><b id="roAlt">4,500</b></div>
+          <div class="ro"><small>Vert speed</small><b id="roVs">0</b></div>
+          <div class="ro"><small>Above ground</small><b id="roAgl">3,100</b></div>
+        </div>
+        <div class="help">Fly with <kbd>←</kbd><kbd>→</kbd> turn, <kbd>↑</kbd> climb, <kbd>↓</kbd> descend (or <kbd>WASD</kbd>, or a game controller's left stick). <kbd>Enter</kbd> start, <kbd>R</kbd> reset, <kbd>Space</kbd> pause, <kbd>X</kbd> take control back from auto-avoid.</div>
+      </section>
+
+      <section class="panel" id="trafficPanel">
+        <h3>Traffic <span class="r" id="trafficCount">0 tracked</span></h3>
+        <div class="tblwrap"><table><thead><tr><th>ID</th><th>Pos</th><th>Rng</th><th>Rel alt</th><th>Next move</th></tr></thead><tbody id="trafficBody"></tbody></table></div>
+      </section>
+
+      <section class="panel" id="infoPanel">
+        <div class="t"><b id="scnName">Head-on at 4,500 ft</b><span id="clock">t = 0.0 s</span><span id="modeName">3D + escape</span></div>
+        <p id="scnBlurb"></p>
+        <div id="tcasNote" hidden></div>
+      </section>
+    </div>
+
+    <section id="result" hidden>
+      <h2 id="resTitle">Safe</h2>
+      <dl id="resList"></dl>
+      <div class="row"><button type="button" class="btn primary" id="againBtn">Run again</button><button type="button" class="btn" id="otherModeBtn">Try another mode</button><button type="button" class="btn" id="closeResBtn">Close</button></div>
+    </section>
+
+    <section class="panel" id="resultsDrawer" hidden>
+      <h3>Test results <span class="r">first move into a red zone = the pilot escaped toward danger</span></h3>
+      <div class="sum" id="sumBox"></div>
+      <div class="tblwrap"><table><thead><tr><th>#</th><th>Scenario</th><th>Mode</th><th>Pilot</th><th>Outcome</th><th>Closest</th><th>Reaction</th><th>First move</th><th>Warning lead</th></tr></thead><tbody id="resultsBody"></tbody></table></div>
+      <div class="actions"><button type="button" class="btn" id="copyCsvBtn">Copy CSV</button><button type="button" class="btn" id="clearResBtn">Clear results</button><button type="button" class="btn" id="closeDrawerBtn">Close</button><span id="copyMsg" class="chip" hidden></span></div>
+      <textarea id="csvBox" readonly hidden></textarea>
+    </section>
+    <div id="nogl" hidden>This display needs WebGL. Try Chrome or Edge with hardware acceleration on.</div>
+  </div>
+</div>
+
+<script src="three.min.js"></script>
+<script>window.THREE || document.write('<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"><\/script>')</script>
+<script>
+// core.js : collision avoidance logic (no rendering). Runs in the browser and in Node.
+// Units inside: meters, seconds, degrees (heading 0 = north, 90 = east).
+// Local frame: e = east (m), n = north (m), u = altitude MSL (m).
+(function (root) {
+  'use strict';
+
+  const KT = 0.514444, FT = 0.3048, NM = 1852, FPM = FT / 60, D2R = Math.PI / 180, R2D = 180 / Math.PI;
+
+  const wrap360 = (a) => { a %= 360; return a < 0 ? a + 360 : a; };
+  const angDiff = (target, current) => { let d = wrap360(target - current); if (d > 180) d -= 360; return d; };
+  const clamp = (x, lo, hi) => (x < lo ? lo : x > hi ? hi : x);
+
+  // Aircraft performance classes. vs options in ft/min, turn rates in deg/s.
+  const PERF = {
+    ga:    { name: 'Light airplane', turn: 3, turnMax: 6, vs: [-1000, -500, 0, 500, 1000], vsMax: 1500, tauTurn: 1.5, tauVs: 2.0 },
+    jet:   { name: 'Regional jet', turn: 3, turnMax: 4, vs: [-1500, -750, 0, 1500, 2500], vsMax: 3000, tauTurn: 2.0, tauVs: 2.5 },
+    helo:  { name: 'Helicopter', turn: 6, turnMax: 10, vs: [-800, -400, 0, 500, 1000], vsMax: 1500, tauTurn: 1.0, tauVs: 1.5 },
+    truck: { name: 'Ground vehicle', turn: 10, turnMax: 20, vs: [0, 0, 0, 0, 0], vsMax: 0, tauTurn: 0.5, tauVs: 0.5 },
+    model: { name: 'Model plane (tabletop)', turn: 6, turnMax: 10, vs: [-1200, -600, 0, 800, 1500], vsMax: 2000, tauTurn: 1.0, tauVs: 1.5 },
+  };
+
+  // Alert volumes: horizontal radius H (m), vertical half height V (m), look-ahead T (s).
+  const VOL = {
+    ta:   { H: 0.6 * NM, V: 800 * FT, T: 35 },   // caution: "Traffic"
+    warn: { H: 0.3 * NM, V: 500 * FT, T: 25 },   // warning: escape guidance
+    prox: { H: 6 * NM, V: 1200 * FT },           // proximate traffic (display only)
+    nmac: { H: 500 * FT, V: 100 * FT },          // near midair collision
+    resolve: { H: 0.3 * NM, V: 350 * FT },       // what an escape must achieve (vertical target close to TCAS's 300 to 400 ft)
+  };
+
+  const PLAN = { H: 60, dt: 0.5, trafficT: 40, delay: 2, dpsi: [-60, -30, 0, 30, 60], replan: 1.0 };
+
+  function makeAircraft(o) {
+    const vs = (o.vsFpm || 0) * FPM;
+    return {
+      id: o.id, label: o.label || o.id, kind: o.kind || 'ga',
+      e: o.e, n: o.n, u: o.u, psi: wrap360(o.psi), V: o.V, vs,
+      omega: o.omega || 0, omegaCmd: o.omega || 0, vsCmd: vs,
+      trimOmega: o.omega || 0, trimVs: vs,
+      Vcmd: o.Vcmd, accel: 0,
+      script: (o.script || []).slice().sort((a, b) => a.at - b.at), scriptIdx: 0,
+      pattern: o.pattern || null,          // {rate} : fly the traffic pattern to final
+      turnTo: null,
+      broadcasting: o.broadcasting !== false,  // ADS-B Out on
+      groundSensed: !!o.groundSensed,          // tracked by airport ground sensors
+      onGround: !!o.onGround, landed: false, crashed: false,
+      note: o.note || '',
+    };
+  }
+
+  function cloneState(a) {
+    return { e: a.e, n: a.n, u: a.u, psi: a.psi, V: a.V, vs: a.vs, omega: a.omega, omegaCmd: a.omegaCmd, vsCmd: a.vsCmd, kind: a.kind };
+  }
+
+  // ---------- runway helpers ----------
+  function runwayFrame(rwy, e, n) {
+    const s = Math.sin(rwy.hdg * D2R), c = Math.cos(rwy.hdg * D2R);
+    const rx = e - rwy.thr.e, ry = n - rwy.thr.n;
+    return { along: rx * s + ry * c, cross: rx * c - ry * s }; // cross > 0 : right of centerline (looking in landing direction)
+  }
+  function onRunway(rwy, e, n, pad) {
+    const f = runwayFrame(rwy, e, n); pad = pad || 0;
+    return f.along >= -pad && f.along <= rwy.length + pad && Math.abs(f.cross) <= rwy.width / 2 + pad;
+  }
+  // Is the aircraft established on final for this runway?
+  function finalStatus(ac, rwy, env) {
+    const f = runwayFrame(rwy, ac.e, ac.n);
+    const agl = ac.u - env.fieldElev;
+    const aligned = Math.abs(angDiff(ac.psi, rwy.hdg)) < 30;
+    const onFinal = aligned && f.along < 200 && f.along > -5 * NM && Math.abs(f.cross) < 0.6 * NM && agl < 2500 * FT && !ac.crashed;
+    const distNm = Math.max(0, -f.along) / NM;
+    return { onFinal, distNm, etaS: ac.V > 1 ? Math.max(0, -f.along) / ac.V : Infinity, along: f.along, cross: f.cross, agl };
+  }
+
+  // ---------- dynamics ----------
+  function applyScript(ac, t) {
+    while (ac.scriptIdx < ac.script.length && ac.script[ac.scriptIdx].at <= t) {
+      const ev = ac.script[ac.scriptIdx++];
+      if (ev.omega !== undefined) { ac.omegaCmd = ev.omega; ac.turnTo = null; }
+      if (ev.vsFpm !== undefined) ac.vsCmd = ev.vsFpm * FPM;
+      if (ev.Vkt !== undefined) ac.Vcmd = ev.Vkt * KT;
+      if (ev.turnTo) ac.turnTo = { psi: ev.turnTo.psi, rate: ev.turnTo.rate };
+      if (ev.accel !== undefined) ac.accel = ev.accel;
+    }
+  }
+
+  // Traffic pattern behavior: downwind -> turn base at the 45 degree point -> turn final at the lead point -> descend.
+  // st.patternPhase carries the leg: 'downwind' | 'toBase' | 'base' | 'toFinal' | 'final'
+  function patternCommand(st, rwy, rate) {
+    const f = runwayFrame(rwy, st.e, st.n);
+    const side = f.cross < 0 ? -1 : 1;
+    const baseHdg = wrap360(rwy.hdg - side * 90);
+    const dwHdg = wrap360(rwy.hdg + 180);
+    if (!st.patternPhase) {
+      if (Math.abs(angDiff(dwHdg, st.psi)) < 45) st.patternPhase = 'downwind';
+      else if (Math.abs(angDiff(rwy.hdg, st.psi)) < 20 && Math.abs(f.cross) < 150) st.patternPhase = 'final';
+      else st.patternPhase = 'base';
+    }
+    if (st.patternPhase === 'downwind') {
+      if (f.along <= -Math.abs(f.cross)) st.patternPhase = 'toBase';
+      else return { omega: 0, vsFpm: null };
+    }
+    if (st.patternPhase === 'toBase') {
+      const d = angDiff(baseHdg, st.psi);
+      if (Math.abs(d) < 3) st.patternPhase = 'base';
+      else return { omega: Math.sign(d) * rate, vsFpm: -500 };
+    }
+    if (st.patternPhase === 'base') {
+      const d = angDiff(rwy.hdg, st.psi);
+      const R = st.V / (rate * D2R);
+      const lead = R * (1 - Math.cos(Math.min(Math.abs(d), 179) * D2R));
+      if (Math.abs(f.cross) <= lead) st.patternPhase = 'toFinal';
+      else return { omega: 0, vsFpm: glideVs(st, rwy, f, -700) };
+    }
+    if (st.patternPhase === 'toFinal') {
+      const d = angDiff(rwy.hdg, st.psi);
+      if (Math.abs(d) < 3) st.patternPhase = 'final';
+      else return { omega: Math.sign(d) * rate, vsFpm: glideVs(st, rwy, f, -700) };
+    }
+    // final: track the centerline and the glide path
+    return { omega: clamp(-f.cross * 0.01 + angDiff(rwy.hdg, st.psi) * 0.5, -2, 2), vsFpm: glideVs(st, rwy, f, -1000) };
+  }
+
+  // vertical speed (ft/min) that converges onto a 3 degree glide path to the threshold
+  function glideVs(st, rwy, f, minFpm) {
+    const gs = Math.tan(3 * D2R);
+    const target = Math.max(0, -f.along) * gs + 15;
+    const agl = st.u - (rwy.elev || 0);
+    const vs = -st.V * gs + (target - agl) * 0.12;
+    return clamp(vs / FPM, minFpm, 0);
+  }
+
+  function stepAircraft(ac, dt, t, env) {
+    if (ac.crashed) return;
+    if (ac.script.length) applyScript(ac, t);
+    const p = PERF[ac.kind] || PERF.ga;
+    if (ac.pattern && env.runway && !ac.onGround) {
+      const cmd = patternCommand(ac, env.runway, ac.pattern.rate || 6);
+      ac.omegaCmd = cmd.omega; if (cmd.vsFpm !== null) ac.vsCmd = cmd.vsFpm * FPM;
+    }
+    if (ac.turnTo) {
+      const d = angDiff(ac.turnTo.psi, ac.psi);
+      ac.omegaCmd = clamp(d * 0.8, -ac.turnTo.rate, ac.turnTo.rate);
+    }
+    ac.omega += (ac.omegaCmd - ac.omega) * Math.min(1, dt / p.tauTurn);
+    ac.vs += (ac.vsCmd - ac.vs) * Math.min(1, dt / p.tauVs);
+    if (ac.Vcmd !== undefined && ac.Vcmd !== null) ac.V += clamp(ac.Vcmd - ac.V, -3 * dt, 3 * dt);
+    if (ac.accel) ac.V = Math.max(ac.kind === 'truck' ? 0 : 8, ac.V + ac.accel * dt);
+    ac.psi = wrap360(ac.psi + ac.omega * dt);
+    ac.e += ac.V * Math.sin(ac.psi * D2R) * dt;
+    ac.n += ac.V * Math.cos(ac.psi * D2R) * dt;
+
+    const h = env.terrain(ac.e, ac.n);
+    if (ac.kind === 'truck') { ac.u = h; ac.vs = 0; return; }
+    if (ac.onGround) {
+      ac.u = h;
+      if (ac.vsCmd > 300 * FPM && ac.V > 30) { ac.onGround = false; ac.landed = false; ac.accel = 0; ac.u = h + 0.6; }
+      else { ac.vs = 0; return; }
+    }
+    ac.u += ac.vs * dt;
+    if (ac.u <= h + 0.3) {
+      const rwy = env.runway;
+      const okRunway = rwy && onRunway(rwy, ac.e, ac.n, 10) && ac.vs > -1200 * FPM &&
+        (Math.abs(angDiff(ac.psi, rwy.hdg)) < 20 || Math.abs(angDiff(ac.psi, rwy.hdg + 180)) < 20);
+      if (okRunway) { ac.u = h; ac.vs = 0; ac.vsCmd = 0; ac.onGround = true; ac.landed = true; ac.accel = -1.8; ac.omegaCmd = 0; }
+      else { ac.u = h; ac.crashed = true; }
+    }
+  }
+
+  // ---------- prediction ----------
+  // Behaviors:
+  //  {type:'current'}  hold the current commands (pilot's present intent)
+  //  {type:'cv'}       straight line at present climb/descent rate
+  //  {type:'turn'}     keep turning at the present rate
+  //  {type:'maneuver', psi, vs, delay}  escape candidate: after delay, turn to heading psi at standard rate and hold vertical speed vs (m/s)
+  //  {type:'intentFinal', rate}  traffic pattern: turn final at the lead point, then descend
+  function predict(ac, beh, H, dt, env) {
+    const steps = Math.round(H / dt);
+    const E = new Float64Array(steps + 1), N = new Float64Array(steps + 1), U = new Float64Array(steps + 1);
+    const p = PERF[ac.kind] || PERF.ga;
+    const st = { e: ac.e, n: ac.n, u: ac.u, psi: ac.psi, V: ac.V, vs: ac.vs, omega: ac.omega, patternPhase: beh.phase || null };
+    let omCmd = ac.omegaCmd, vsCmd = ac.vsCmd;
+    if (beh.type === 'cv') { omCmd = 0; vsCmd = ac.vs; st.omega = 0; }
+    if (beh.type === 'turn') { omCmd = ac.omega; vsCmd = ac.vs; }
+    const ground = !!ac.onGround;
+    E[0] = st.e; N[0] = st.n; U[0] = st.u;
+    for (let k = 1; k <= steps; k++) {
+      const t = k * dt;
+      if (beh.type === 'maneuver' && t > beh.delay) {
+        const d = angDiff(beh.psi, st.psi);
+        omCmd = clamp(d * 0.8, -p.turn, p.turn);
+        vsCmd = beh.vs;
+      } else if (beh.type === 'intentFinal' && env.runway) {
+        const cmd = patternCommand(st, env.runway, beh.rate || 6);
+        omCmd = cmd.omega; if (cmd.vsFpm !== null) vsCmd = cmd.vsFpm * FPM;
+      }
+      st.omega += (omCmd - st.omega) * Math.min(1, dt / p.tauTurn);
+      st.vs += (vsCmd - st.vs) * Math.min(1, dt / p.tauVs);
+      if (ground || ac.kind === 'truck') st.vs = 0;
+      st.psi = wrap360(st.psi + st.omega * dt);
+      st.e += st.V * Math.sin(st.psi * D2R) * dt;
+      st.n += st.V * Math.cos(st.psi * D2R) * dt;
+      st.u += st.vs * dt;
+      E[k] = st.e; N[k] = st.n; U[k] = st.u;
+    }
+    return { E, N, U, dt, steps };
+  }
+
+  function minSep(A, B, Hn, Vn, T) {
+    const kmax = Math.min(A.steps, B.steps, Math.round(T / A.dt));
+    let best = Infinity, bk = 0, bdh = 0, bdv = 0, nmac = false, nmacK = -1;
+    for (let k = 0; k <= kmax; k++) {
+      const dh = Math.hypot(A.E[k] - B.E[k], A.N[k] - B.N[k]);
+      const dv = Math.abs(A.U[k] - B.U[k]);
+      const s = Math.max(dh / Hn, dv / Vn);
+      if (s < best) { best = s; bk = k; bdh = dh; bdv = dv; }
+      if (!nmac && dh < VOL.nmac.H && dv < VOL.nmac.V) { nmac = true; nmacK = k; }
+    }
+    return { s: best, t: bk * A.dt, dh: bdh, dv: bdv, nmac, tNmac: nmacK * A.dt };
+  }
+
+  // What could this intruder do next? Weighted hypotheses (the "behavior prediction" layer).
+  function hypotheses(ac, env) {
+    if (ac.kind === 'truck') return [{ w: 1, beh: { type: 'cv' }, label: 'continuing' }];
+    const list = [];
+    if (Math.abs(ac.omega) > 0.6) {
+      list.push({ w: 0.5, beh: { type: 'turn' }, label: 'continuing turn' });
+      list.push({ w: 0.5, beh: { type: 'cv' }, label: 'rolling out' });
+    } else {
+      list.push({ w: 1, beh: { type: 'cv' }, label: 'straight' });
+    }
+    const leg = env.runway && ac.kind !== 'jet' ? patternLeg(ac, env.runway, env) : null;
+    if (leg) {
+      list.forEach((h) => { h.w *= 0.4; });
+      const label = leg === 'downwind' ? 'likely turning base, then final' : 'likely turning final';
+      list.push({ w: 0.6, beh: { type: 'intentFinal', rate: 6, phase: leg }, label, leg });
+    }
+    return list;
+  }
+
+  // Which traffic pattern leg is this aircraft flying, if any? (the "intent" cue a tower controller would read)
+  function patternLeg(ac, rwy, env) {
+    const f = runwayFrame(rwy, ac.e, ac.n);
+    const agl = ac.u - env.fieldElev;
+    if (agl > 1800 * FT || agl < 150 * FT) return null;
+    if (Math.abs(f.cross) > 1.8 * NM || Math.abs(f.cross) < 150) return null;
+    if (f.along < -3 * NM || f.along > rwy.length + 0.5 * NM) return null;
+    const dw = wrap360(rwy.hdg + 180);
+    if (Math.abs(angDiff(dw, ac.psi)) < 30 && f.along > -Math.abs(f.cross)) return 'downwind';
+    const want = f.cross < 0 ? rwy.hdg + 90 : rwy.hdg - 90;
+    if (f.along < 0 && Math.abs(angDiff(want, ac.psi)) < 40) return 'base';
+    return null;
+  }
+  const isOnBase = (ac, rwy, env) => patternLeg(ac, rwy, env) === 'base';
+
+  function geometry(own, it) {
+    const de = it.e - own.e, dn = it.n - own.n, du = it.u - own.u;
+    const range = Math.hypot(de, dn);
+    const brg = wrap360(Math.atan2(de, dn) * R2D);
+    const relBrg = angDiff(brg, own.psi);
+    let clock = Math.round(wrap360(relBrg) / 30); if (clock === 0) clock = 12;
+    // straight-line horizontal closest approach (what classic logic sees)
+    const ve = it.V * Math.sin(it.psi * D2R) - own.V * Math.sin(own.psi * D2R);
+    const vn = it.V * Math.cos(it.psi * D2R) - own.V * Math.cos(own.psi * D2R);
+    const v2 = ve * ve + vn * vn;
+    const tcpa = v2 > 1e-6 ? Math.max(0, -(de * ve + dn * vn) / v2) : 0;
+    const dcpa = Math.hypot(de + ve * tcpa, dn + vn * tcpa);
+    const closure = range > 1 ? -(de * ve + dn * vn) / range : 0;
+    return { range, brg, relBrg, clock, du, tcpa, dcpa, closure };
+  }
+
+  // Classic straight-line alerting (TCAS-style tau logic, simplified) for comparison.
+  function classicLevel(g) {
+    if (g.closure <= 0.5) return (g.range < 0.5 * NM && Math.abs(g.du) < 800 * FT) ? 2 : 0;
+    const tau = g.range / g.closure;
+    if (tau <= VOL.warn.T && g.dcpa < VOL.warn.H && Math.abs(g.du) < VOL.warn.V * 1.5) return 3;
+    if (tau <= VOL.ta.T && g.dcpa < VOL.ta.H && Math.abs(g.du) < VOL.ta.V) return 2;
+    return 0;
+  }
+
+  function assess(own, it, ownTrack, env) {
+    const g = geometry(own, it);
+    const hyps = hypotheses(it, env);
+    let ta = { s: Infinity }, warn = { s: Infinity }, hypLabel = hyps[0].label, mainTrack = null, worstTrack = null;
+    let bestW = -1;
+    const tracks = [];
+    for (const h of hyps) {
+      const tr = predict(it, h.beh, PLAN.H, PLAN.dt, env);
+      tracks.push({ w: h.w, track: tr, label: h.label });
+      if (h.w > bestW) { bestW = h.w; mainTrack = tr; }
+      if (h.w < 0.3) continue;
+      const a = minSep(ownTrack, tr, VOL.ta.H, VOL.ta.V, VOL.ta.T);
+      const w = minSep(ownTrack, tr, VOL.warn.H, VOL.warn.V, VOL.warn.T);
+      if (a.s < ta.s) ta = a;
+      if (w.s < warn.s) { warn = w; hypLabel = h.label; worstTrack = tr; }
+    }
+    let level = 0;
+    if (g.range < VOL.prox.H && Math.abs(g.du) < VOL.prox.V) level = 1;
+    if (ta.s < 1) level = 2;
+    if (warn.s < 1) level = 3;
+    if (g.range < 0.25 * NM && Math.abs(g.du) < 400 * FT && it.kind !== 'truck') level = 3;
+    else if (g.range < 0.5 * NM && Math.abs(g.du) < 800 * FT && it.kind !== 'truck') level = Math.max(level, 2);
+    if (it.kind === 'truck') level = 0; // ground vehicles are handled by the runway logic
+    return {
+      id: it.id, label: it.label, kind: it.kind, level, ...g,
+      tMin: warn.s < Infinity ? warn.t : ta.t, sepH: warn.dh, sepV: warn.dv, sMin: warn.s,
+      hypLabel, tracks, mainTrack, worstTrack: worstTrack || mainTrack,
+      classic: classicLevel(g),
+      vsFpm: it.vs / FPM, broadcasting: it.broadcasting,
+    };
+  }
+
+  function isHeadOn(own, it) {
+    const g = geometry(own, it);
+    if (Math.abs(g.relBrg) >= 25) return false;
+    // nose to nose, or something almost stopped dead ahead (a slow balloon, a drone, the sensor's object): keep right
+    return Math.abs(angDiff(it.psi, own.psi + 180)) < 35 || (it.V || 0) < 10;
+  }
+
+  function terrainClearance(tr, env, T) {
+    const kmax = Math.min(tr.steps, Math.round(T / tr.dt));
+    let minAgl = Infinity, tAt = 0;
+    for (let k = 0; k <= kmax; k++) {
+      const agl = tr.U[k] - env.terrain(tr.E[k], tr.N[k]);
+      if (agl < minAgl) { minAgl = agl; tAt = k * tr.dt; }
+    }
+    return { minAgl, tAt };
+  }
+
+  const STATUS = ['safe', 'caution', 'unsafe'];
+
+  // The OLD planning layer (kept for comparison): score a 5 x 5 grid of fixed maneuvers.
+  function planEscapeGrid(own, threats, env, opt) {
+    opt = opt || {};
+    const p = PERF[own.kind] || PERF.ga;
+    const psi0 = opt.psi0 !== undefined ? opt.psi0 : own.psi;
+    const agl0 = own.u - env.terrain(own.e, own.n);
+    const intrTracks = [];
+    let headOn = false;
+    for (const th of threats) {
+      if (th.level >= 3 && opt.intruders) {
+        const it = opt.intruders.find((a) => a.id === th.id);
+        if (it && isHeadOn(own, it)) headOn = true;
+      }
+      if (th.range > 8 * NM || Math.abs(th.du) > 3000 * FT) continue;
+      for (const tr of th.tracks) if (tr.w >= 0.3) intrTracks.push({ id: th.id, track: tr.track });
+    }
+    const cands = [];
+    for (const dpsi of PLAN.dpsi) {
+      for (const vsF of p.vs) {
+        const psi = wrap360(psi0 + dpsi);
+        const tr = predict(own, { type: 'maneuver', psi, vs: vsF * FPM, delay: PLAN.delay }, PLAN.H, PLAN.dt, env);
+        let sMin = Infinity, nmac = false, worstId = null, tAt = 0;
+        for (const it of intrTracks) {
+          const m = minSep(tr, it.track, VOL.resolve.H, VOL.resolve.V, PLAN.trafficT);
+          if (m.s < sMin) { sMin = m.s; worstId = it.id; tAt = m.t; }
+          if (m.nmac) nmac = true;
+        }
+        const terr = terrainClearance(tr, env, PLAN.H);
+        const trafficStatus = nmac || sMin < 0.55 ? 2 : sMin < 1 ? 1 : 0;
+        // terrain margins: en route we want real clearance; near the ground (approach) only protect against hitting it
+        let terrainStatus = 0;
+        if (agl0 > 1500 * FT) {
+          if (terr.minAgl < 500 * FT) terrainStatus = 2; else if (terr.minAgl < 1000 * FT) terrainStatus = 1;
+        } else {
+          if (terr.minAgl < 100 * FT) terrainStatus = 2; else if (terr.minAgl < 300 * FT && vsF < 0) terrainStatus = 1;
+        }
+        const status = Math.max(trafficStatus, terrainStatus);
+        let cost = [0, 8, 50][status];
+        if (status < 2) cost += 2 * (1 - Math.min(sMin, 2) / 2);
+        cost += 0.7 * Math.abs(dpsi) / 30 + 0.6 * Math.abs(vsF) / p.vs[4];
+        if (vsF < 0 && agl0 < 2000 * FT) cost += 0.6;
+        if (headOn && dpsi < 0) cost += 2.5;
+        if (headOn && dpsi > 0) cost -= 0.3;
+        if (opt.onFinal) { if (vsF > 0) cost -= 0.8; else if (dpsi !== 0) cost += 0.5; } // on final, a go-around is the expected escape
+        if (nmac) cost += 100;
+        if (terrainStatus === 2) cost += 100;
+        const col = dpsi < 0 ? 0 : dpsi === 0 ? 1 : 2;
+        const row = vsF > 0 ? 0 : vsF === 0 ? 1 : 2;
+        if (opt.prev && opt.prev.dpsi === dpsi && opt.prev.vs === vsF && status < 2) cost -= 1.2;
+        cands.push({ dpsi, vs: vsF, psi, track: tr, sMin, nmac, worstId, tAt, minAgl: terr.minAgl, trafficStatus, terrainStatus, status, cost, col, row });
+      }
+    }
+    const cells = [[null, null, null], [null, null, null], [null, null, null]];
+    for (const c of cands) {
+      const cur = cells[c.row][c.col];
+      if (!cur || c.cost < cur.cost) cells[c.row][c.col] = c;
+    }
+    let best = cands[0];
+    for (const c of cands) if (c.cost < best.cost) best = c;
+    // No option reaches a safe miss distance in time: like TCAS when it cannot reach its target separation,
+    // pick whatever buys the most separation (without flying into terrain) instead of the least effort.
+    if (best.status === 2) {
+      let pick = null;
+      for (const c of cands) {
+        if (c.terrainStatus === 2) continue;
+        if (!pick || c.sMin > pick.sMin + 1e-3 || (Math.abs(c.sMin - pick.sMin) <= 1e-3 && c.cost < pick.cost)) pick = c;
+      }
+      if (pick) best = pick;
+    }
+    return { cands, cells, best, psi0, headOn, noSafe: best.status === 2 };
+  }
+
+
+  // The planning layer: collision-cone CBF-QP inside each of 9 pass sides, flown forward 40 s.
+  let PLANNER = 'cbf';
+  function planEscape(own, threats, env, opt) {
+    return PLANNER === 'grid' ? planEscapeGrid(own, threats, env, opt) : planEscapeCBF(own, threats, env, opt);
+  }
+  function setPlanner(name) { PLANNER = name === 'grid' ? 'grid' : 'cbf'; }
+
+  function scoreBranch(own, ro, intrTracks, env, ctx) {
+    let sMin = Infinity, nmac = false, worstId = null, tAt = 0;
+    for (const it of intrTracks) {
+      const m = minSep(ro.track, it.track, VOL.resolve.H, VOL.resolve.V, PLAN.trafficT);
+      if (m.s < sMin) { sMin = m.s; worstId = it.id; tAt = m.t; }
+      if (m.nmac) nmac = true;
+    }
+    const terr = terrainClearance(ro.track, env, PLAN.trafficT);
+    const trafficStatus = nmac || sMin < 0.55 ? 2 : sMin < 1 ? 1 : 0;
+    let terrainStatus = 0;
+    if (ctx.agl0 > 1500 * FT) { if (terr.minAgl < 500 * FT) terrainStatus = 2; else if (terr.minAgl < 1000 * FT) terrainStatus = 1; }
+    else { if (terr.minAgl < 100 * FT) terrainStatus = 2; else if (terr.minAgl < 300 * FT && ro.vsPeak < 0) terrainStatus = 1; }
+    return { sMin, nmac, worstId, tAt, minAgl: terr.minAgl, trafficStatus, terrainStatus, status: Math.max(trafficStatus, terrainStatus) };
+  }
+
+  function planEscapeCBF(own, threats, env, opt) {
+    opt = opt || {};
+    const psi0 = opt.psi0 !== undefined ? opt.psi0 : own.psi;
+    const agl0 = own.u - env.terrain(own.e, own.n);
+    let headOn = false;
+    for (const th of threats) {
+      if (th.level >= 3 && opt.intruders) {
+        const it = opt.intruders.find((a) => a.id === th.id);
+        if (it && isHeadOn(own, it)) headOn = true;
+      }
+    }
+    const intrs = cbfIntruders(own, threats);
+    const intrTracks = intrs.map((i) => ({ id: i.id, track: i.track }));
+    // converging traffic on our right has the right of way (14 CFR 91.113(d)): we give way behind it
+    let giveWayRight = false;
+    for (const th of threats) if (th.level >= 3 && !headOn && th.relBrg > 10 && th.relBrg < 110 && th.closure > 0) giveWayRight = true;
+    // least intervention relative to what the pilot is doing now
+    const nominal = { omega: own.omegaCmd * D2R, vsCmd: own.vsCmd };
+    const cands = [], cells = [[null, null, null], [null, null, null], [null, null, null]];
+    // once the turn is clearly under way, keep that pass side: telling the pilot left, then right, is worse
+    // than a slightly less efficient escape (a reversal still happens if the side we are on stops working)
+    const turned = angDiff(own.psi, psi0);
+    const sideLock = Math.abs(turned) >= 10 && opt.prev && opt.prev.branch && opt.prev.branch.turn !== 'S' && (turned > 0) === (opt.prev.branch.turn === 'R') ? opt.prev.branch.turn : null;
+    for (let row = 0; row < 3; row++) for (let col = 0; col < 3; col++) {
+      const branch = { turn: TURN_BR[col], vert: VERT_BR[row] };
+      const ro = cbfRollout(own, intrs, branch, nominal, { H: PLAN.trafficT, dt: PLAN.dt });
+      const sc = scoreBranch(own, ro, intrTracks, env, { agl0 });
+      let cost = [0, 8, 50][sc.status];
+      if (sc.status < 2) cost += 2 * (1 - Math.min(sc.sMin, 2) / 2);   // more room is better
+      cost += 3 * ro.effort;                                              // least intervention (QP objective)
+      if (ro.slackMax > 1e-3) cost += 4;                                  // the filter had to bend a barrier
+      cost += 0.25 * (col !== 1) + 0.15 * (row !== 1);                    // a maneuver nobody needs is not free
+      if (row === 2 && agl0 < 2000 * FT) cost += 0.6;                     // do not descend near the ground
+      if (headOn && col === 0) cost += 2.5;                               // head-on: both turn right (14 CFR 91.113)
+      if (headOn && col === 2) cost -= 0.3;
+      if (giveWayRight && col === 0) cost += 0.8;                         // converging from the right: pass behind it
+      if (row === 2) cost += 0.2;                                         // equal room either way: climb, away from the ground
+      if (opt.onFinal) { if (row === 0) cost -= 0.8; else if (col !== 1) cost += 0.5; }   // on final: go around
+      if (sideLock && branch.turn !== sideLock && sc.status < 2) cost += 3;
+      if (sc.nmac) cost += 100;
+      if (sc.terrainStatus === 2) cost += 100;
+      if (opt.prev && opt.prev.branch && opt.prev.branch.turn === branch.turn && opt.prev.branch.vert === branch.vert && sc.status < 2) cost -= 1.2;
+      const vsFpm = Math.round((ro.clearT > 0 ? ro.vsPeak : own.vs) / FPM / 100) * 100;
+      const dpsi = Math.round(angDiff(ro.psiEnd, psi0));
+      const c = Object.assign({
+        branch, dpsi: Math.abs(dpsi) < 3 ? 0 : dpsi, vs: Math.abs(vsFpm) < 150 ? 0 : vsFpm, psi: wrap360(ro.psiEnd), track: ro.track, cost, col, row,
+        cmd: ro.first, durS: ro.clearT, effort: ro.effort, slack: ro.slackMax, cappedS: ro.cappedS, algo: 'cbf',
+      }, sc);
+      cands.push(c); cells[row][col] = c;
+    }
+    let best = cands[0];
+    for (const c of cands) if (c.cost < best.cost) best = c;
+    if (best.status === 2) {                 // nothing reaches a safe miss: buy the most room, not the least effort
+      let pick = null;
+      for (const c of cands) {
+        if (c.terrainStatus === 2) continue;
+        if (!pick || c.sMin > pick.sMin + 1e-3 || (Math.abs(c.sMin - pick.sMin) <= 1e-3 && c.cost < pick.cost)) pick = c;
+      }
+      if (pick) best = pick;
+    }
+    return { cands, cells, best, psi0, headOn, giveWayRight, noSafe: best.status === 2, intrs, nominal, algo: 'cbf' };
+  }
+
+  // Last safe moment: the longest the pilot can keep the present command and still escape with this branch.
+  function lastSafeMoment(own, plan, env, maxS) {
+    if (!plan || !plan.best || !plan.best.branch || !plan.intrs) return null;
+    const intrTracks = plan.intrs.map((i) => ({ id: i.id, track: i.track }));
+    const agl0 = own.u - env.terrain(own.e, own.n);
+    const safeAt = (d) => {
+      const ro = cbfRollout(own, plan.intrs, plan.best.branch, plan.nominal, { H: PLAN.trafficT, dt: PLAN.dt, delay: d });
+      const sc = scoreBranch(own, ro, intrTracks, env, { agl0 });
+      // "still escapes": keeps 80 % of the protected volume, no near miss, no terrain conflict
+      return !sc.nmac && sc.terrainStatus < 2 && (sc.sMin >= 0.8 || (plan.best.status > 0 && sc.sMin >= plan.best.sMin * 0.9));
+    };
+    if (!safeAt(0)) return 0;
+    let lo = 0, hi = maxS || 16;
+    if (safeAt(hi)) return hi;
+    while (hi - lo > 0.5) { const mid = (lo + hi) / 2; if (safeAt(mid)) lo = mid; else hi = mid; }
+    return lo;
+  }
+
+  function describe(best, own) {
+    if (!best) return { text: '', voice: '' };
+    if (best.algo === 'cbf' && best.branch) return describeCBF(best, own);
+    const turn = best.dpsi === 0 ? '' : best.dpsi > 0 ? 'right' : 'left';
+    const vert = best.vs > 0 ? 'climb' : best.vs < 0 ? 'descend' : '';
+    const hdg = String(Math.round(best.psi) % 360 || 360).padStart(3, '0');
+    const parts = [];
+    if (turn) parts.push('TURN ' + turn.toUpperCase() + ' HDG ' + hdg); else parts.push('HOLD HDG ' + hdg);
+    if (vert) parts.push(vert.toUpperCase() + ' ' + Math.abs(best.vs) + ' FPM'); else parts.push('HOLD ALTITUDE');
+    let voice = '';
+    if (turn && vert) voice = 'Turn ' + turn + ', ' + vert + '.';
+    else if (turn) voice = 'Turn ' + turn + ', hold altitude.';
+    else if (vert) voice = vert.charAt(0).toUpperCase() + vert.slice(1) + ', hold heading.';
+    else voice = 'Hold heading and altitude.';
+    return { text: parts.join('  ·  '), voice, turn, vert, hdg };
+  }
+
+  function describeCBF(best, own) {
+    const turn = best.branch.turn === 'R' ? 'right' : best.branch.turn === 'L' ? 'left' : '';
+    const vert = best.branch.vert === 'C' ? 'climb' : best.branch.vert === 'D' ? 'descend' : '';
+    const hdg = String(Math.round(best.psi) % 360 || 360).padStart(3, '0');
+    const bank = Math.round(Math.abs(best.cmd.bankDeg) / 5) * 5;
+    const fpm = Math.abs(best.vs);
+    const parts = [];
+    if (turn) parts.push('TURN ' + turn.toUpperCase() + ' ' + Math.max(bank, 10) + '° BANK TO ' + hdg); else parts.push('HOLD HDG ' + hdg);
+    if (vert) parts.push(vert.toUpperCase() + ' ' + fpm.toLocaleString('en-US') + ' FPM'); else parts.push('HOLD ALTITUDE');
+    if (best.durS > 0) parts.push(Math.round(best.durS) + ' S');
+    let voice;
+    if (turn && vert) voice = 'Turn ' + turn + ', ' + vert + '.';
+    else if (turn) voice = 'Turn ' + turn + ', hold altitude.';
+    else if (vert) voice = vert.charAt(0).toUpperCase() + vert.slice(1) + ', ' + vert + '.';
+    else voice = 'Monitor vertical speed.';
+    return { text: parts.join('  ·  '), voice, turn, vert, hdg, bank, fpm, durS: best.durS };
+  }
+
+  // Ground sensor logic (same idea as runway_guard.py): is a vehicle on the runway, or about to enter it?
+  function runwayIncursion(vehicles, rwy, horizon) {
+    let worst = null;
+    for (const v of vehicles) {
+      if (v.crashed) continue;
+      const f0 = runwayFrame(rwy, v.e, v.n);
+      const inside = f0.along >= 0 && f0.along <= rwy.length && Math.abs(f0.cross) <= rwy.width / 2 + 3;
+      if (inside) { worst = { id: v.id, label: v.label, inside: true, tEntry: 0 }; break; }
+      if (v.V < 0.5) continue;
+      for (let t = 0.5; t <= horizon; t += 0.5) {
+        const e = v.e + v.V * Math.sin(v.psi * D2R) * t, n = v.n + v.V * Math.cos(v.psi * D2R) * t;
+        if (onRunway(rwy, e, n, 3)) {
+          if (!worst || t < worst.tEntry) worst = { id: v.id, label: v.label, inside: false, tEntry: t };
+          break;
+        }
+      }
+    }
+    return worst;
+  }
+
+  function goAround(own, rwy) {
+    const p = PERF[own.kind] || PERF.ga;
+    return { dpsi: 0, vs: p.vs[4], psi: rwy.hdg, status: 0, goAround: true, cost: 0, col: 1, row: 0 };
+  }
+
+  // ---------- terrain ----------
+  function makeTerrain(fieldElevM, hills) {
+    return function (e, n) {
+      let h = fieldElevM;
+      for (const k of hills) {
+        const c = Math.cos((k.rot || 0) * D2R), s = Math.sin((k.rot || 0) * D2R);
+        const x = (e - k.e) * c - (n - k.n) * s, y = (e - k.e) * s + (n - k.n) * c;
+        h += k.h * Math.exp(-(x * x) / (2 * k.sx * k.sx) - (y * y) / (2 * k.sy * k.sy));
+      }
+      return h;
+    };
+  }
+
+  // =====================================================================================================
+  // Collision-cone CBF-QP escape planner (replaces the old 5 x 5 grid of fixed maneuvers)
+  //
+  //  1. Barrier (Tayal et al., collision-cone CBF):   h = r.w + sqrt(|r|^2 - rho^2) |w|
+  //     r = p_own - p_intruder, w = v_own - v_intruder, in a scaled frame where 350 ft of height counts
+  //     like 0.3 nm of distance (the protected zone is an ellipsoid, as in TCAS). h >= 0: the relative
+  //     velocity points outside the collision cone; h < 0: holding course enters the protected zone.
+  //  2. h_dot = b + A.a_own is affine in the own acceleration, so the safety condition
+  //     h_dot + gamma h >= 0 is ONE linear inequality per intruder intent hypothesis.
+  //     Robust term: the intruder may accelerate up to aiMax beyond its predicted track.
+  //  3. Fixed-wing mapping: a_own = a_t * t_hat + V * omega * n_hat + a_z * z_hat. The QP is solved in
+  //     the controls an airplane really has (speed change, turn rate, vertical acceleration) with their
+  //     limits, minimizing the change from the pilot's present command (least intervention).
+  //  4. Pass-side branching: the safe set of velocities is not convex (pass left or right, above or
+  //     below) and in a head-on encounter the barrier gradient sideways is exactly zero, so one QP cannot
+  //     choose a side. We solve the QP inside each of 9 pass sides (left/straight/right x climb/level/
+  //     descend), fly each one forward 40 s in closed loop, and pick with the rules of the air.
+  //  5. Last safe moment: how long can the pilot keep the present command and still escape with the
+  //     chosen branch? The autopilot takes over at that moment if the pilot has not acted.
+  // =====================================================================================================
+  const CBF = {
+    rho: 0.3 * NM,                  // protected radius (m), the "resolve" volume
+    vK: (0.3 * NM) / (350 * FT),    // vertical scale: 350 ft of height = 0.3 nm of distance
+    gamma: 0.35,                    // 1/s: how fast h may fall toward the cone boundary
+    aiMax: 0.4,                     // m/s^2: unmodeled intruder acceleration (robust margin)
+    kAge: 40,                       // m per second of report age (rho_effective)
+    kQ: 150,                        // m extra for a 0-quality track (rho_effective)
+    atMax: 0.3,                     // m/s^2: speed change is allowed but expensive (fixed wing cannot stop)
+    wT: 8, wW: 1, wZ: 0.7,          // effort weights on normalized controls (vertical slightly preferred)
+    slackW: 5e4,                    // penalty on violating a barrier (logged, never treated as safe)
+    turnFrac: 0.3,                  // a turning branch commits to >= 30 % of max turn rate while in conflict
+    straightFrac: 0.08,             // a straight branch keeps the turn rate under 8 % of max
+    vsBranch: 500 * FPM,            // a climbing or descending branch commits to >= 500 ft/min
+    levelBand: 150 * FPM,           // a level branch stays within 150 ft/min
+    hNorm: 0.12,                    // "in conflict" while h / (|r||w|) is below this and closing
+    rangeCut: 6 * NM,               // ignore intruders farther than this in the rollout
+  };
+  const TURN_BR = ['L', 'S', 'R'], VERT_BR = ['C', 'H', 'D'];
+
+  const v3 = {
+    dot: (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2],
+    norm: (a) => Math.hypot(a[0], a[1], a[2]),
+  };
+
+  // effective protected radius: report age (s) and track quality q (0..1) enlarge the zone
+  function rhoEff(ageS, q) {
+    return CBF.rho + CBF.kAge * Math.max(0, ageS || 0) + CBF.kQ * (1 - (q === undefined ? 1 : clamp(q, 0, 1)));
+  }
+
+  // intruder kinematics (scaled frame) at step k of a predicted track
+  function trackKin(tr, k) {
+    const K = Math.min(Math.max(k, 1), tr.steps - 1), dt = tr.dt, s = CBF.vK;
+    const P = (i) => [tr.E[i], tr.N[i], tr.U[i] * s];
+    const p0 = P(K - 1), p1 = P(K), p2 = P(K + 1);
+    const kk = Math.min(Math.max(k, 0), tr.steps);
+    return {
+      p: [tr.E[kk], tr.N[kk], tr.U[kk] * s],
+      v: [(p2[0] - p0[0]) / (2 * dt), (p2[1] - p0[1]) / (2 * dt), (p2[2] - p0[2]) / (2 * dt)],
+      a: [(p2[0] - 2 * p1[0] + p0[0]) / (dt * dt), (p2[1] - 2 * p1[1] + p0[1]) / (dt * dt), (p2[2] - 2 * p1[2] + p0[2]) / (dt * dt)],
+    };
+  }
+
+  // one barrier constraint  g . x >= rhs  for own state st (deg/m/s units) against intruder kinematics ik
+  function barrierRow(st, ik, rho) {
+    const s = CBF.vK, ps = st.psi * D2R, sp = Math.sin(ps), cp = Math.cos(ps);
+    const r = [st.e - ik.p[0], st.n - ik.p[1], st.u * s - ik.p[2]];
+    const w = [st.V * sp - ik.v[0], st.V * cp - ik.v[1], st.vs * s - ik.v[2]];
+    const d2 = v3.dot(r, r), wn = v3.norm(w);
+    if (wn < 0.3) return null;                                   // no relative motion: nothing to constrain
+    const d = Math.sqrt(d2), rw = v3.dot(r, w);
+    const beta = Math.sqrt(Math.max(d2 - rho * rho, 1));         // inside the zone: tiny beta, pushes r.w up
+    const h = rw + beta * wn;
+    const A = [r[0] + (beta / wn) * w[0], r[1] + (beta / wn) * w[1], r[2] + (beta / wn) * w[2]];
+    const b = wn * wn + (rw / beta) * wn - v3.dot(A, ik.a);
+    const rhs = -b - CBF.gamma * h + v3.norm(A) * CBF.aiMax;
+    // a_own = a_t * [sp, cp, 0] + V * omega * [cp, -sp, 0] + a_z * [0, 0, s]
+    const g = [A[0] * sp + A[1] * cp, st.V * (A[0] * cp - A[1] * sp), s * A[2]];
+    return { g, rhs, h, hn: h / Math.max(1e-6, d * wn), closing: rw < 0, d, inside: d2 <= rho * rho };
+  }
+
+  // Exact solver for this small QP:  min 1/2 sum W_j (x_j - xn_j)^2 + 1/2 slackW s^2
+  //   s.t.  g_i . x + s >= rhs_i ,  lb <= x <= ub ,  s >= 0.
+  // Substituting y = sqrt(W) (x - xn) turns it into "closest point to the origin inside a polytope" in
+  // 3 (or 4, with the slack) dimensions. The optimum satisfies the KKT conditions for exactly one set of
+  // active constraints, so we enumerate active sets by size and stop at the first KKT point: exact and
+  // deterministic, no iterations to tune. The slack is used only when the hard problem is infeasible.
+  function linSolve(Ain, bin) {
+    const n = bin.length, A = Ain.map((r) => r.slice()), b = bin.slice();
+    for (let c = 0; c < n; c++) {
+      let piv = c; for (let r = c + 1; r < n; r++) if (Math.abs(A[r][c]) > Math.abs(A[piv][c])) piv = r;
+      if (Math.abs(A[piv][c]) < 1e-12) return null;
+      [A[c], A[piv]] = [A[piv], A[c]]; [b[c], b[piv]] = [b[piv], b[c]];
+      for (let r = c + 1; r < n; r++) { const f = A[r][c] / A[c][c]; for (let q = c; q < n; q++) A[r][q] -= f * A[c][q]; b[r] -= f * b[c]; }
+    }
+    const x = new Array(n).fill(0);
+    for (let r = n - 1; r >= 0; r--) { let acc = b[r]; for (let q = r + 1; q < n; q++) acc -= A[r][q] * x[q]; x[r] = acc / A[r][r]; }
+    return x;
+  }
+  function minNormQP(C, d, n, exhaustive) {   // min 1/2 |y|^2  s.t.  C_i . y >= d_i
+    const m = C.length, tol = 1e-9;
+    // round-off scales with the size of the terms, not just the right-hand side
+    const yn = (y) => Math.sqrt(y.reduce((acc, v) => acc + v * v, 0));
+    const cn = C.map((c) => Math.sqrt(c.reduce((acc, v) => acc + v * v, 0)));
+    const feasible = (y) => { const ny = yn(y); for (let i = 0; i < m; i++) { let s = 0; for (let q = 0; q < n; q++) s += C[i][q] * y[q]; if (s < d[i] - 1e-9 * (1 + Math.abs(d[i]) + cn[i] * ny)) return false; } return true; };
+    const zero = new Array(n).fill(0);
+    if (feasible(zero)) return zero;
+    // fast path: dual active set (add the most violated constraint, drop negative multipliers)
+    {
+      const S = [];
+      for (let it = 0; it < 30; it++) {
+        let y = zero.slice(), lam = [];
+        if (S.length) {
+          const G = S.map((i) => S.map((j) => { let s = 0; for (let q = 0; q < n; q++) s += C[i][q] * C[j][q]; return s; }));
+          lam = linSolve(G, S.map((i) => d[i]));
+          if (!lam) break;
+          let worstA = -1, worstL = -tol;
+          lam.forEach((l, aa) => { if (l < worstL) { worstL = l; worstA = aa; } });
+          if (worstA >= 0) { S.splice(worstA, 1); continue; }
+          S.forEach((i, aa) => { for (let q = 0; q < n; q++) y[q] += lam[aa] * C[i][q]; });
+        }
+        let worstI = -1, worstV = 0;
+        for (let i = 0; i < m; i++) {
+          if (S.includes(i)) continue;
+          let s = 0; for (let q = 0; q < n; q++) s += C[i][q] * y[q];
+          const viol = (d[i] - s) / Math.sqrt(C[i].reduce((acc, c) => acc + c * c, 0) || 1);
+          if (viol > worstV + 1e-9) { worstV = viol; worstI = i; }
+        }
+        if (worstI < 0) return y;                          // KKT: feasible with non-negative multipliers
+        if (S.length >= n) break;                          // would over-determine: let the exact search decide
+        S.push(worstI);
+      }
+    }
+    if (!exhaustive) return null;
+    const cand = [];
+    for (let i = 0; i < m; i++) if (d[i] > 0) cand.push(i);   // only constraints violated at y = 0 can be active... first pass
+    const all = [...Array(m).keys()];
+    const trySets = (pool) => {
+      const S = [];
+      const rec = (start, size) => {
+        if (S.length === size) {
+          const G = S.map((i) => S.map((j) => { let s = 0; for (let q = 0; q < n; q++) s += C[i][q] * C[j][q]; return s; }));
+          const lam = linSolve(G, S.map((i) => d[i]));
+          if (!lam || lam.some((l) => l < -tol)) return null;
+          const y = zero.slice();
+          S.forEach((i, a) => { for (let q = 0; q < n; q++) y[q] += lam[a] * C[i][q]; });
+          return feasible(y) ? y : null;
+        }
+        for (let i = start; i < pool.length; i++) { S.push(pool[i]); const r = rec(i + 1, size); S.pop(); if (r) return r; }
+        return null;
+      };
+      for (let size = 1; size <= Math.min(n, pool.length); size++) { const r = rec(0, size); if (r) return r; }
+      return null;
+    };
+    return trySets(cand) || trySets(all);
+  }
+  function solveQP(xn, W, rows, lb, ub) {
+    const D = W.map(Math.sqrt);
+    const C = [], d = [];
+    for (const r of rows) { C.push([r.g[0] / D[0], r.g[1] / D[1], r.g[2] / D[2]]); d.push(r.rhs - (r.g[0] * xn[0] + r.g[1] * xn[1] + r.g[2] * xn[2])); }
+    for (let j = 0; j < 3; j++) {
+      const up = [0, 0, 0]; up[j] = -1; C.push(up); d.push(-D[j] * (ub[j] - xn[j]));
+      const lo = [0, 0, 0]; lo[j] = 1; C.push(lo); d.push(D[j] * (lb[j] - xn[j]));
+    }
+    // order: fast hard solve -> fast relaxed solve -> exhaustive hard -> exhaustive relaxed
+    const ks = 1 / Math.sqrt(CBF.slackW), nr = rows.length;
+    const C4 = C.map((c, i) => [c[0], c[1], c[2], i < nr ? ks : 0]), d4 = d.slice();
+    C4.push([0, 0, 0, 1]); d4.push(0);
+    let y = minNormQP(C, d, 3, false), slack = 0;
+    let y4 = null;
+    if (!y) { y4 = minNormQP(C4, d4, 4, false); if (y4 && y4[3] * ks < 1e-9) { y = y4.slice(0, 3); y4 = null; } }
+    if (!y && !y4) y = minNormQP(C, d, 3, true);
+    if (!y && !y4) y4 = minNormQP(C4, d4, 4, true);
+    if (!y && y4) { y = y4.slice(0, 3); slack = y4[3] * ks; }
+    if (!y) {
+      // degenerate corner (more active constraints than unknowns): least squared violation over the
+      // control box by projected gradient. Always converges; reached only when the exact search fails.
+      const x = xn.map((v, j) => clamp(v, lb[j], ub[j]));
+      const L = rows.reduce((acc, r) => acc + v3.dot(r.g, r.g), 0) || 1;
+      for (let it = 0; it < 300; it++) {
+        const gr = [0, 0, 0];
+        for (const r of rows) { const v = r.rhs - v3.dot(r.g, x); if (v > 0) for (let j = 0; j < 3; j++) gr[j] -= v * r.g[j]; }
+        for (let j = 0; j < 3; j++) x[j] = clamp(x[j] - gr[j] / L, lb[j], ub[j]);
+      }
+      slack = Math.max(0, ...rows.map((r) => r.rhs - v3.dot(r.g, x)));
+      return { x, slack, lam: null, fallback: true };
+    }
+    const x = [xn[0] + y[0] / D[0], xn[1] + y[1] / D[1], xn[2] + y[2] / D[2]];
+    for (let j = 0; j < 3; j++) x[j] = clamp(x[j], lb[j], ub[j]);
+    return { x, slack, lam: null };
+  }
+
+  // control limits for the airplane right now, optionally narrowed to a pass side
+  function controlBox(st, p, branch, inConflict) {
+    const wMax = p.turnMax * D2R, tau = p.tauVs, vsMax = p.vsMax * FPM;
+    const lb = [-CBF.atMax, -wMax, (-vsMax - st.vs) / tau], ub = [CBF.atMax, wMax, (vsMax - st.vs) / tau];
+    if (branch && inConflict) {
+      if (branch.turn === 'R') lb[1] = CBF.turnFrac * wMax;
+      if (branch.turn === 'L') ub[1] = -CBF.turnFrac * wMax;
+      if (branch.turn === 'S') { lb[1] = -CBF.straightFrac * wMax; ub[1] = CBF.straightFrac * wMax; }
+      const vsLo = branch.vert === 'C' ? CBF.vsBranch : branch.vert === 'D' ? -vsMax : -CBF.levelBand;
+      const vsHi = branch.vert === 'C' ? vsMax : branch.vert === 'D' ? -CBF.vsBranch : CBF.levelBand;
+      lb[2] = Math.max(lb[2], (vsLo - st.vs) / tau); ub[2] = Math.min(ub[2], (vsHi - st.vs) / tau);
+    }
+    for (let j = 0; j < 3; j++) if (lb[j] > ub[j]) { const m = (lb[j] + ub[j]) / 2; lb[j] = ub[j] = m; }
+    if (st.V < 15) { lb[0] = ub[0] = 0; }                       // ground speed too low to use speed changes
+    return { lb, ub };
+  }
+
+  // one safety-filter step: returns the commanded {a_t, omega (rad/s), a_z} plus barrier bookkeeping
+  function cbfStep(st, p, intrs, k, branch, nominal, warm) {
+    const rows = [];
+    let inConflict = false, hnMin = Infinity;
+    for (const it of intrs) {
+      const ik = trackKin(it.track, k);
+      const dx = st.e - ik.p[0], dy = st.n - ik.p[1];
+      if (Math.hypot(dx, dy) > CBF.rangeCut) continue;
+      const row = barrierRow(st, ik, it.rho);
+      if (!row) continue;
+      if (row.hn < hnMin) hnMin = row.hn;
+      if ((row.closing && row.hn < CBF.hNorm) || row.inside) inConflict = true;
+      if (row.closing || row.hn < 0) rows.push(row);            // opening and outside the cone: cannot bind
+    }
+    const box = controlBox(st, p, branch, inConflict);
+    // feasibility-adaptive barrier: when the relative velocity is already inside the cone (h < 0), the
+    // zeroing condition can ask for more recovery than the airplane can give. Ask for at most 85 % of the
+    // best recovery rate reachable inside this branch's limits, so the QP stays feasible and can still
+    // minimize effort; the shortfall is recorded, never treated as safe.
+    let capped = 0;
+    for (const row of rows) {
+      let gmax = 0;
+      for (let j = 0; j < 3; j++) gmax += Math.max(row.g[j] * box.lb[j], row.g[j] * box.ub[j]);
+      const cap = 0.85 * gmax;
+      if (row.rhs > cap) { row.rhs = cap; capped++; }
+    }
+    const xn = [0, clamp(nominal.omega, box.lb[1] - 1, box.ub[1] + 1), (nominal.vsCmd - st.vs) / p.tauVs];
+    const W = [CBF.wT / (CBF.atMax * CBF.atMax), CBF.wW / Math.pow(p.turnMax * D2R, 2), CBF.wZ / Math.pow(p.vsMax * FPM / p.tauVs, 2)];
+    let sol;
+    if (!rows.length) sol = { x: [0, clamp(xn[1], box.lb[1], box.ub[1]), clamp(xn[2], box.lb[2], box.ub[2])], slack: 0, lam: null };
+    else sol = solveQP(xn, W, rows, box.lb, box.ub, warm);
+    let effort = 0;
+    for (let j = 0; j < 3; j++) effort += W[j] * Math.pow(sol.x[j] - (j === 0 ? 0 : xn[j]), 2);
+    return { x: sol.x, slack: sol.slack, lam: sol.lam, inConflict, hnMin, effort, nRows: rows.length, capped };
+  }
+
+  // fly the airplane forward under the safety filter (closed loop) and record the path
+  //   opts.delay: seconds the pilot keeps the present command before the escape starts
+  function cbfRollout(own, intrs, branch, nominal, opts) {
+    const p = PERF[own.kind] || PERF.ga, dt = opts.dt || PLAN.dt, H = opts.H || PLAN.trafficT;
+    const steps = Math.round(H / dt), delay = opts.delay || 0;
+    const E = new Float64Array(steps + 1), N = new Float64Array(steps + 1), U = new Float64Array(steps + 1);
+    const st = { e: own.e, n: own.n, u: own.u, psi: own.psi, V: own.V, vs: own.vs, omega: own.omega };
+    const V0 = own.V;
+    E[0] = st.e; N[0] = st.n; U[0] = st.u;
+    let slackMax = 0, effort = 0, conflictSteps = 0, clearT = 0, vsPeak = 0, first = null, warm = null, psiEnd = st.psi, cappedSteps = 0;
+    for (let k = 1; k <= steps; k++) {
+      const t = (k - 1) * dt;
+      let omegaCmd, vsCmd;
+      if (t < delay) { omegaCmd = own.omegaCmd; vsCmd = own.vsCmd; }
+      else {
+        const r = cbfStep(st, p, intrs, k - 1, branch, nominal, warm);
+        warm = r.lam && r.nRows ? r.lam : null;
+        omegaCmd = r.x[1] * R2D;
+        vsCmd = clamp(st.vs + r.x[2] * p.tauVs, -p.vsMax * FPM, p.vsMax * FPM);
+        st.V = clamp(st.V + r.x[0] * dt, V0 * 0.85, V0 * 1.12);
+        if (!first) first = { omegaDeg: omegaCmd, vsFpm: vsCmd / FPM, aT: r.x[0], bankDeg: Math.atan(st.V * r.x[1] / 9.81) * R2D, inConflict: r.inConflict };
+        if (r.inConflict) {
+          conflictSteps++; clearT = t + dt; effort += r.effort * dt; slackMax = Math.max(slackMax, r.slack);
+          if (r.capped) cappedSteps++;
+          if (Math.abs(vsCmd) > Math.abs(vsPeak)) vsPeak = vsCmd;
+          psiEnd = st.psi;
+        }
+      }
+      st.omega += (omegaCmd - st.omega) * Math.min(1, dt / p.tauTurn);
+      st.vs += (vsCmd - st.vs) * Math.min(1, dt / p.tauVs);
+      st.psi = wrap360(st.psi + st.omega * dt);
+      st.e += st.V * Math.sin(st.psi * D2R) * dt;
+      st.n += st.V * Math.cos(st.psi * D2R) * dt;
+      st.u += st.vs * dt;
+      E[k] = st.e; N[k] = st.n; U[k] = st.u;
+      if (conflictSteps && k * dt <= clearT + dt) psiEnd = st.psi;
+    }
+    return { track: { E, N, U, dt, steps }, slackMax, effort: effort / H, clearT, psiEnd, vsPeak, cappedS: cappedSteps * dt, first: first || { omegaDeg: 0, vsFpm: own.vs / FPM, aT: 0, bankDeg: 0, inConflict: false } };
+  }
+
+  // the intruder intents the filter must respect: every credible hypothesis track, with its own rho
+  function cbfIntruders(own, threats) {
+    const list = [];
+    for (const th of threats) {
+      if (th.kind === 'truck' || th.range > 8 * NM || Math.abs(th.du) > 3000 * FT) continue;
+      const rho = rhoEff(th.ageS || 0, th.quality === undefined ? 1 : th.quality);
+      for (const h of th.tracks) if (h.w >= 0.3) list.push({ id: th.id, track: h.track, w: h.w, rho, label: h.label });
+    }
+    return list;
+  }
+
+  // the live command for the autopilot (or any caller) right now, inside a chosen pass side
+  function cbfCommand(own, intrs, branch, nominal, kOffset) {
+    const p = PERF[own.kind] || PERF.ga;
+    const r = cbfStep({ e: own.e, n: own.n, u: own.u, psi: own.psi, V: own.V, vs: own.vs }, p, intrs, Math.max(0, kOffset || 0), branch, nominal, null);
+    return { omegaDeg: r.x[1] * R2D, vsCmd: clamp(own.vs + r.x[2] * p.tauVs, -p.vsMax * FPM, p.vsMax * FPM), aT: r.x[0], slack: r.slack, inConflict: r.inConflict, hnMin: r.hnMin };
+  }
+
+  root.CA = {
+    KT, FT, NM, FPM, D2R, R2D, PERF, VOL, PLAN, STATUS, CBF, rhoEff, trackKin, barrierRow, solveQP, controlBox, cbfStep, cbfRollout, cbfIntruders, cbfCommand,
+    wrap360, angDiff, clamp, makeAircraft, cloneState, stepAircraft, predict, minSep, hypotheses, isOnBase,
+    geometry, classicLevel, assess, isHeadOn, planEscape, planEscapeGrid, planEscapeCBF, setPlanner, lastSafeMoment, describe, runwayFrame, onRunway, finalStatus, patternLeg, patternCommand,
+    runwayIncursion, goAround, makeTerrain, terrainClearance,
+  };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// scenarios.js : scripted encounters for the demo. Pure data + builders, no rendering.
+(function (root) {
+  'use strict';
+  const CA = root.CA;
+  const { KT, FT, NM, D2R } = CA;
+
+  const FIELD_ELEV_FT = 1400;          // demo field elevation (Phoenix area fields sit around 1,100 to 1,500 ft)
+  const FIELD = FIELD_ELEV_FT * FT;
+  const ft = (x) => x * FT;
+  const GS = Math.tan(3 * D2R);         // 3 degree glide path
+
+  function makeRunway() {
+    const hdg = 40, length = 2000, width = 45;
+    const s = Math.sin(hdg * D2R), c = Math.cos(hdg * D2R);
+    return {
+      name: '04', recip: '22', hdg, length, width, elev: FIELD,
+      thr: { e: -s * length / 2, n: -c * length / 2 },
+      far: { e: s * length / 2, n: c * length / 2 },
+      taxiAlong: 600,                  // taxiway crossing, meters past the RWY 04 threshold
+    };
+  }
+
+  // Point from runway coordinates: along (m, negative = before the threshold), cross (m, + = right of centerline)
+  function rwyPoint(rwy, along, cross) {
+    const s = Math.sin(rwy.hdg * D2R), c = Math.cos(rwy.hdg * D2R);
+    return { e: rwy.thr.e + along * s + cross * c, n: rwy.thr.n + along * c - cross * s };
+  }
+
+  // Desert ridges around the field for scenery (Gaussian hills: h in m above field).
+  const SCENERY = [
+    { e: 15000, n: 9000, h: ft(2600), sx: 2600, sy: 1300, rot: 35 },
+    { e: 9000, n: 17000, h: ft(1900), sx: 1800, sy: 1200, rot: -20 },
+    { e: -17000, n: 11000, h: ft(2300), sx: 3200, sy: 1700, rot: 10 },
+    { e: -9000, n: 22000, h: ft(1500), sx: 2200, sy: 1500, rot: 60 },
+    { e: 19000, n: -15000, h: ft(3100), sx: 3000, sy: 1800, rot: -35 },
+    { e: -21000, n: -6000, h: ft(1800), sx: 2000, sy: 2600, rot: 0 },
+  ];
+
+  function baseEnv(extraHills) {
+    const runway = makeRunway();
+    const hills = SCENERY.concat(extraHills || []);
+    return { fieldElev: FIELD, runway, hills, terrain: CA.makeTerrain(FIELD, hills) };
+  }
+
+  function onGlidePath(rwy, along) { return FIELD + Math.max(0, -along) * GS; }
+
+  const BUILDERS = {
+    headon() {
+      const env = baseEnv();
+      const own = CA.makeAircraft({ id: 'OWN', label: 'You', kind: 'ga', e: -4000, n: -12000, u: ft(4500), psi: 90, V: 110 * KT });
+      const traffic = [
+        CA.makeAircraft({ id: 'N738CR', label: 'N738CR', kind: 'ga', e: -4000 + 4.2 * NM, n: -12000 + 35, u: ft(4540), psi: 270, V: 120 * KT }),
+      ];
+      return { env, own, traffic, duration: 95 };
+    },
+
+    pattern() {
+      const env = baseEnv();
+      const rwy = env.runway;
+      const a0 = -2.9 * NM;
+      const p = rwyPoint(rwy, a0, 0);
+      const V = 130 * KT;
+      const own = CA.makeAircraft({ id: 'OWN', label: 'You', kind: 'ga', e: p.e, n: p.n, u: onGlidePath(rwy, a0), psi: rwy.hdg, V, vsFpm: -(V * GS) / CA.FPM });
+      const d = rwyPoint(rwy, -0.4 * NM, -0.6 * NM);   // left downwind for runway 04
+      const traffic = [
+        CA.makeAircraft({ id: 'N52LP', label: 'N52LP', kind: 'ga', e: d.e, n: d.n, u: FIELD + ft(800), psi: rwy.hdg + 180, V: 65 * KT, pattern: { rate: 6 } }),
+      ];
+      return { env, own, traffic, duration: 85 };
+    },
+
+    helo() {
+      const env = baseEnv();
+      const rwy = env.runway;
+      const a0 = -3.6 * NM;
+      const p = rwyPoint(rwy, a0, 0);
+      const V = 140 * KT;
+      const own = CA.makeAircraft({ id: 'OWN', label: 'You (jet)', kind: 'jet', e: p.e, n: p.n, u: onGlidePath(rwy, a0), psi: rwy.hdg, V, vsFpm: -(V * GS) / CA.FPM });
+      const tToP = (3.6 - 1.0) * NM / V;
+      const hV = 100 * KT;
+      const h = rwyPoint(rwy, -1.0 * NM, tToP * hV);
+      const traffic = [
+        CA.makeAircraft({ id: 'HELO1', label: 'HELO 1', kind: 'helo', e: h.e, n: h.n, u: FIELD + ft(350), psi: rwy.hdg - 90, V: hV }),
+      ];
+      return { env, own, traffic, duration: 80 };
+    },
+
+    terrain() {
+      const ridge = { e: -1500, n: -11500, h: ft(5000), sx: 600, sy: 5000, rot: 0 };
+      const env = baseEnv([ridge]);
+      const own = CA.makeAircraft({ id: 'OWN', label: 'You', kind: 'ga', e: 0, n: -16728, u: ft(6000), psi: 0, V: 120 * KT });
+      const traffic = [
+        CA.makeAircraft({ id: 'N4410K', label: 'N4410K', kind: 'ga', e: -40, n: -6975, u: ft(6000), psi: 180, V: 120 * KT }),
+        CA.makeAircraft({ id: 'N96TS', label: 'N96TS', kind: 'ga', e: 2946, n: -14541, u: ft(5130), psi: 300, V: 105 * KT, vsFpm: 900, script: [{ at: 58, vsFpm: 0 }] }),
+      ];
+      return { env, own, traffic, duration: 118 };
+    },
+
+    incursion() {
+      const env = baseEnv();
+      const rwy = env.runway;
+      const a0 = -2.0 * NM;
+      const p = rwyPoint(rwy, a0, 0);
+      const V = 130 * KT;
+      const own = CA.makeAircraft({ id: 'OWN', label: 'You (jet)', kind: 'jet', e: p.e, n: p.n, u: onGlidePath(rwy, a0), psi: rwy.hdg, V, vsFpm: -(V * GS) / CA.FPM });
+      const tp = rwyPoint(rwy, rwy.taxiAlong, -250);
+      const traffic = [
+        CA.makeAircraft({
+          id: 'RESCUE7', label: 'Fire truck', kind: 'truck', e: tp.e, n: tp.n, u: FIELD, psi: rwy.hdg + 90, V: 0,
+          broadcasting: false, groundSensed: true,
+          script: [{ at: 41, Vkt: 26 }, { at: 59.5, Vkt: 0 }],
+        }),
+      ];
+      return { env, own, traffic, duration: 80 };
+    },
+  };
+
+  const SCENARIOS = [
+    { key: 'headon', name: 'Head-on at 4,500 ft', short: 'Head-on',
+      blurb: 'Two light airplanes closing head-on at about 230 knots. A head-on target barely moves in the windshield, so it is the hardest one to spot.' },
+    { key: 'pattern', name: 'Base to final', short: 'Pattern',
+      blurb: 'You are on a fast straight-in final. A slow trainer on downwind will turn base and then final right in front of you. Straight-line logic sees it passing by; the prediction layer expects the turns.' },
+    { key: 'helo', name: 'Low helicopter crossing', short: 'Helicopter',
+      blurb: 'Jet on final, helicopter crossing the approach 150 ft above its route ceiling. Below 1,000 ft TCAS gives a traffic alert only, no escape guidance.' },
+    { key: 'terrain', name: 'Ridge on the left', short: 'Terrain',
+      blurb: 'Head-on traffic, a climber below on the right and a ridge on the left. Some escapes are worse than doing nothing; the display shows which.' },
+    { key: 'incursion', name: 'Fire truck on the runway', short: 'Runway',
+      blurb: 'Jet on a 2 mile final. A fire truck with no transponder heads for the runway. Only the airport ground sensors can see it.' },
+  ];
+
+  function build(key) {
+    const b = BUILDERS[key];
+    if (!b) throw new Error('Unknown scenario ' + key);
+    const s = b();
+    s.key = key;
+    s.meta = SCENARIOS.find((x) => x.key === key);
+    return s;
+  }
+
+  root.SCN = { SCENARIOS, build, makeRunway, rwyPoint, baseEnv, FIELD, FIELD_ELEV_FT, SCENERY };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// sim.js : runs one encounter. Perception -> prediction -> planning, plus scoring for the A/B test.
+(function (root) {
+  'use strict';
+  const CA = root.CA;
+  const { FT, NM, FPM, PLAN } = CA;
+
+  const MODES = {
+    full:   { key: 'full', name: 'Full system', short: '3D + escape', show3dTraffic: true, showPlan: true, showGuidance: true, voice: 'full' },
+    tcas2d: { key: 'tcas2d', name: '2D traffic map', short: '2D map', show3dTraffic: false, showPlan: true, showGuidance: false, voice: 'traffic' },
+    alert:  { key: 'alert', name: 'Alert only', short: 'Alert only', show3dTraffic: false, showPlan: false, showGuidance: false, voice: 'traffic' },
+  };
+
+  // Auto-avoid backup, modeled on fielded systems: Airbus AP/FD TCAS lets the autopilot fly a TCAS
+  // resolution, and the F-16's Auto-GCAS takes over only at the last moment and gives control back after.
+  const AUTO = {
+    delay: 5,        // seconds the pilot gets to start an escape (TCAS assumes about 5 s to respond)
+    lastMoment: 12,  // take over at once if the conflict is this close and nothing is being done (fallback)
+    lsmMargin: 1.0,  // take over this many seconds before the calculated last safe moment
+  };
+
+  // what the pilot is told to do, as a key: a new callout only when the pass side really changes
+  function guidanceKeyOf(b) { return b.branch ? b.branch.turn + b.branch.vert : b.dpsi + '/' + b.vs; }
+
+  function clockWords(th) {
+    const hl = th.du > 300 * FT ? 'high' : th.du < -300 * FT ? 'low' : 'same altitude';
+    const r = th.range / NM;
+    const dist = r < 0.95 ? 'less than one mile' : r < 1.5 ? 'one mile' : Math.round(r) + ' miles';
+    return 'Traffic, ' + th.clock + " o'clock, " + hl + ', ' + dist + '.';
+  }
+
+  class Sim {
+    constructor(scn, opts) {
+      opts = opts || {};
+      this.scn = scn; this.env = scn.env; this.own = scn.own; this.traffic = scn.traffic;
+      this.duration = scn.duration || 90;
+      this.mode = MODES[opts.mode] || MODES.full;
+      this.autopilot = !!opts.autopilot;               // always fly the escape (preview and "Always" setting)
+      this.autoMode = opts.autopilot ? 'always' : (opts.auto || 'backup');   // backup | always | off
+      this.external = !!opts.external;                 // positions come from outside (tabletop camera)
+      this.pilot = opts.autopilot ? 'auto' : (opts.pilot || 'you');
+      this.autoAvoid = null; this.autoInhibit = false; this.autoCountdown = null; this.warnSince = null;
+      this.t = 0; this.evalTimer = 0;
+      this.threats = []; this.plan = null; this.level = 0; this.classic = 0; this.incursion = null; this.final = null;
+      this.psi0 = null; this.prevBest = null; this.lowSince = null; this.guidanceKey = '';
+      this.events = []; this.ended = false; this.endReason = '';
+      this.input = { x: 0, y: 0, active: false };
+      this.runwayExternal = null;
+      this.stats = {
+        closest: { s: Infinity, dh: Infinity, dv: Infinity, t: 0, id: null },
+        nmac: false, collision: false, cfit: false, landed: false, goAround: false,
+        firstAlertT: null, firstWarnT: null, classicFirstT: null, classicWarnT: null,
+        firstInputT: null, firstMove: null, firstMoveStatus: null,
+        autoT: null, autoReason: null, autoDisconnected: false,
+      };
+      this.ownTrack = null;
+      this.evaluate();
+    }
+
+    emit(type, text, extra) { const ev = Object.assign({ t: this.t, type, text }, extra || {}); this.events.push(ev); return ev; }
+
+    setInput(x, y) {
+      this.input.x = CA.clamp(x, -1, 1); this.input.y = CA.clamp(y, -1, 1);
+      this.input.active = Math.abs(x) > 0.05 || Math.abs(y) > 0.05;
+    }
+
+    effectiveAuto() { return this.mode.showGuidance ? this.autoMode : 'off'; }   // today's systems have no auto-avoid
+
+    // Pilot pressed the disconnect: hand control back and do not re-engage during this encounter.
+    disconnectAuto() {
+      if (!this.autoAvoid) { this.autoInhibit = true; this.autoCountdown = null; return; }
+      this.autoAvoid = null; this.autoInhibit = true; this.stats.autoDisconnected = true;
+      this.emit('autoOff', 'Auto avoid disconnected', { voiceFull: 'Auto avoid off.', voiceTraffic: null });
+    }
+
+    // Is the airplane's present path already clear of every warning-level threat (and the ground)?
+    resolving() {
+      const own = this.own;
+      if (this.plan && this.plan.goAround) return own.vs > 300 * FPM || own.vsCmd > 300 * FPM;
+      const tr = this.ownTrack; if (!tr) return false;
+      for (const th of this.threats) {
+        if (th.level < 3) continue;
+        for (const h of th.tracks) {
+          if (h.w < 0.3) continue;
+          if (CA.minSep(tr, h.track, CA.VOL.resolve.H, CA.VOL.resolve.V, PLAN.trafficT).s < 1) return false;
+        }
+      }
+      const agl0 = own.u - this.env.terrain(own.e, own.n);
+      const need = agl0 > 1500 * FT ? 300 * FT : 100 * FT;      // a traffic escape must not trade it for terrain
+      return CA.terrainClearance(tr, this.env, PLAN.H).minAgl > need;
+    }
+
+    flyEscape(g) {
+      const own = this.own, p = CA.PERF[own.kind];
+      if (g.branch && this.plan && this.plan.intrs) {
+        // the autopilot flies the safety filter itself: re-solved every step, inside the chosen pass side,
+        // with "wings level, hold altitude" as the nominal it tries to stay close to
+        const k = Math.round((this.t - (this.planT || this.t)) / PLAN.dt);
+        const cmd = CA.cbfCommand(own, this.plan.intrs, g.branch, { omega: 0, vsCmd: Math.max(0, own.trimVs || 0) }, k);
+        own.omegaCmd = cmd.omegaDeg;
+        own.vsCmd = cmd.vsCmd;
+        own.trimVs = Math.max(own.trimVs, 0);
+        own.trimPsi = own.psi;                 // when the autopilot lets go, hold the heading it reached
+        this.autoCmd = cmd;
+        return;
+      }
+      own.omegaCmd = CA.clamp(CA.angDiff(g.psi, own.psi) * 0.8, -p.turn, p.turn);
+      own.vsCmd = g.vs * FPM;
+      own.trimVs = Math.max(own.trimVs, 0);
+      own.trimPsi = g.psi;
+    }
+
+    controls() {
+      const own = this.own, p = CA.PERF[own.kind];
+      const g = this.plan && this.plan.best && this.level >= 3 ? this.plan.best : null;
+      if (this.autoAvoid && g) { this.flyEscape(g); return; }
+      const hold = () => {
+        if (own.trimPsi !== undefined) { own.omegaCmd = CA.clamp(CA.angDiff(own.trimPsi, own.psi) * 0.8, -p.turn, p.turn); own.vsCmd = own.trimVs; }
+        else { own.omegaCmd = own.trimOmega; own.vsCmd = own.trimVs; }
+      };
+      if (this.autopilot) { if (g) this.flyEscape(g); else hold(); return; }
+      const inp = this.input;
+      if (inp.active) {
+        own.trimPsi = undefined;
+        own.omegaCmd = inp.x * p.turnMax;
+        own.vsCmd = CA.clamp(own.trimVs + inp.y * p.vsMax * FPM, -p.vsMax * FPM, p.vsMax * FPM);
+        // once the pilot reacts to an alert (or climbs), releasing the stick levels off instead of resuming the descent
+        if (inp.y > 0.3 || (this.level >= 2 && (Math.abs(inp.x) > 0.3 || Math.abs(inp.y) > 0.3))) own.trimVs = Math.max(own.trimVs, 0);
+        if (this.stats.firstAlertT !== null && this.stats.firstInputT === null && (Math.abs(inp.x) > 0.3 || Math.abs(inp.y) > 0.3)) {
+          const col = inp.x < -0.3 ? 0 : inp.x > 0.3 ? 2 : 1;
+          const row = inp.y > 0.3 ? 0 : inp.y < -0.3 ? 2 : 1;
+          this.stats.firstInputT = this.t;
+          this.stats.firstMove = ['Climb', 'Level', 'Descend'][row] + ' / ' + ['left', 'straight', 'right'][col];
+          const cell = this.plan && this.plan.cells ? this.plan.cells[row][col] : null;
+          this.stats.firstMoveStatus = cell ? CA.STATUS[cell.status] : 'n/a';
+        }
+      } else hold();
+    }
+
+    step(dt) {
+      if (this.ended) return;
+      if (!this.external) {
+        this.controls();
+        CA.stepAircraft(this.own, dt, this.t, this.env);
+        for (const a of this.traffic) CA.stepAircraft(a, dt, this.t, this.env);
+      }
+      this.t += dt;
+      this.checkSeparation();
+      this.evalTimer += dt;
+      if (this.evalTimer >= 0.25) { this.evalTimer = 0; this.evaluate(); }
+      if (!this.ended && this.t >= this.duration) this.end('Time up');
+    }
+
+    checkSeparation() {
+      const own = this.own, st = this.stats;
+      for (const a of this.traffic) {
+        if (a.crashed) continue;
+        const dh = Math.hypot(a.e - own.e, a.n - own.n), dv = Math.abs(a.u - own.u);
+        if (a.kind === 'truck') {
+          const agl = own.u - this.env.terrain(own.e, own.n);
+          if (dh < 22 && agl < 8) { st.collision = true; this.emit('collision', 'Collision with ground vehicle'); this.end('Collision with the fire truck'); return; }
+          continue;
+        }
+        const s = Math.max(dh / CA.VOL.nmac.H, dv / CA.VOL.nmac.V);
+        if (s < st.closest.s) st.closest = { s, dh, dv, t: this.t, id: a.id };
+        if (!st.nmac && dh < CA.VOL.nmac.H && dv < CA.VOL.nmac.V) { st.nmac = true; this.emit('nmac', 'Near midair collision with ' + a.label); }
+        const wing = own.kind === 'jet' || a.kind === 'jet' || a.kind === 'helo' ? 30 : 18;
+        if (dh < wing && dv < 8) { st.collision = true; this.emit('collision', 'Midair collision with ' + a.label); this.end('Midair collision'); return; }
+      }
+      if (own.crashed) { st.cfit = true; this.emit('cfit', 'Flew into terrain'); this.end('Flew into terrain'); return; }
+      if (own.landed && !st.landed) { st.landed = true; this.emit('landed', 'Touchdown'); }
+      if (own.landed && own.V < 22 && !this.traffic.some((a) => a.kind === 'truck' && !a.crashed && Math.hypot(a.e - own.e, a.n - own.n) < 300)) this.end('Landed');
+    }
+
+    evaluate() {
+      const own = this.own, env = this.env;
+      this.ownTrack = CA.predict(own, { type: 'current' }, PLAN.H, PLAN.dt, env);
+      const airborne = this.traffic.filter((a) => a.kind !== 'truck' && !a.crashed);
+      const seen = airborne.filter((a) => a.broadcasting);
+      this.threats = seen.map((a) => CA.assess(own, a, this.ownTrack, env));
+      // Latch alerts per intruder (like TCAS): once raised, keep them until the intruder is diverging.
+      // Without this the warning would switch off the moment the pilot starts the escape.
+      this.latch = this.latch || {};
+      for (const th of this.threats) {
+        const prev = this.latch[th.id] || 0;
+        const diverging = th.closure <= 0.3 && th.range > 0.15 * NM;
+        const far = th.range > 3 * NM || Math.abs(th.du) > 2000 * FT;
+        if (th.level >= 2 && th.level >= prev) this.latch[th.id] = th.level;
+        else if (prev >= 2 && (diverging || far)) delete this.latch[th.id];
+        else if (prev >= 2) th.level = Math.max(th.level, prev);
+        th.latched = !!this.latch[th.id];
+      }
+      this.threats.sort((a, b) => b.level - a.level || a.range - b.range);
+      // live board: the laptop's alert level (from the sensor) decides when an escape is needed
+      if (this.forceLevel && this.threats[0]) this.threats[0].level = Math.max(this.threats[0].level, this.forceLevel);
+      let level = this.threats.reduce((m, th) => Math.max(m, th.level), 0);
+      const classic = this.threats.reduce((m, th) => Math.max(m, th.classic), 0);
+
+      // airport ground sensors: runway incursion while we are landing
+      let inc = null;
+      if (env.runway) {
+        this.final = CA.finalStatus(own, env.runway, env);
+        const landing = (this.final.onFinal && this.final.distNm < 4) || (own.onGround && own.V > 25);
+        if (landing) {
+          const vehicles = this.traffic.filter((a) => a.kind === 'truck' && a.groundSensed && !a.crashed);
+          inc = CA.runwayIncursion(vehicles, env.runway, 20);
+          const ext = this.runwayExternal;
+          if (!inc && ext && ext.state === 'INCURSION' && ext.fresh) inc = { id: 'STATION', label: 'Runway station', inside: true, tEntry: 0, external: true };
+        }
+      }
+      // a go-around stays on until the airplane is safely climbing away
+      if (inc) this.goAroundLatch = true;
+      else if (this.goAroundLatch && (own.u - env.terrain(own.e, own.n) > 1000 * FT || own.crashed)) this.goAroundLatch = false;
+      if (!inc && this.goAroundLatch) inc = this.lastIncursion || { id: 'RWY', label: 'Runway', inside: true, tEntry: 0 };
+      this.incursion = inc; if (inc) this.lastIncursion = inc;
+      if (inc) level = Math.max(level, 3);
+
+      const st = this.stats;
+      if (classic >= 2 && st.classicFirstT === null) st.classicFirstT = this.t;
+      if (classic >= 3 && st.classicWarnT === null) st.classicWarnT = this.t;
+
+      if (level >= 2) {
+        if (level >= 3 && this.psi0 === null) this.psi0 = own.psi;
+        const goAround = inc && (this.final.onFinal || own.onGround || this.goAroundLatch);
+        if (goAround) {
+          this.plan = { best: CA.goAround(own, env.runway), cells: null, goAround: true, psi0: env.runway.hdg };
+          if (!st.goAround) { st.goAround = true; }
+        } else {
+          // the 9-branch search runs once a second (the autopilot re-solves its own command every step)
+          const stale = !this.plan || this.plan.goAround || this.t - (this.planT || -99) >= PLAN.replan || level >= 3 && this.level < 3;
+          if (stale) {
+            this.plan = CA.planEscape(own, this.threats, env, { psi0: this.psi0 !== null ? this.psi0 : own.psi, prev: level >= 3 ? this.prevBest : null, intruders: airborne, onFinal: !!(this.final && this.final.onFinal) });
+            this.planT = this.t; this.lsmT = null;
+          }
+        }
+        // If the best option at the start of a warning is simply "carry on" and it is safe, the present
+        // path already works: stay at a traffic advisory instead of announcing an escape.
+        const b = this.plan.best;
+        if (!this.forceLevel && level >= 3 && this.level < 3 && !this.plan.goAround && b && b.dpsi === 0 && b.vs === 0 && b.status === 0 && Math.abs(own.vs) < 200 * FPM) {
+          level = 2; this.psi0 = null;
+        }
+        if (level >= 3) this.prevBest = this.plan.best;
+        this.lowSince = null;
+      } else {
+        if (this.level >= 3 && this.lowSince === null) this.lowSince = this.t;
+        if (this.lowSince !== null && this.t - this.lowSince > 3) { this.psi0 = null; this.prevBest = null; this.lowSince = null; }
+        this.plan = null;
+      }
+
+      // events (the app turns these into voice callouts)
+      const top = this.threats[0];
+      if (level >= 2 && this.level < 2) {
+        if (st.firstAlertT === null) st.firstAlertT = this.t;
+        if (inc && !top) this.emit('ta', 'Runway traffic');
+        else if (top) this.emit('ta', clockWords(top), { voiceFull: clockWords(top), voiceTraffic: 'Traffic, traffic.' });
+      }
+      if (level >= 3 && this.level < 3) {
+        if (st.firstWarnT === null) st.firstWarnT = this.t;
+        if (st.firstAlertT === null) st.firstAlertT = this.t;
+        if (this.plan && this.plan.goAround) this.emit('warn', 'Runway occupied. Go around.', { voiceFull: 'Go around. Runway occupied.', voiceTraffic: null });
+        else {
+          const d = CA.describe(this.plan.best, own);
+          this.emit('warn', d.text, { voiceFull: d.voice, voiceTraffic: 'Traffic, traffic.' });
+        }
+        this.guidanceKey = this.plan && this.plan.best ? guidanceKeyOf(this.plan.best) : '';
+      } else if (level >= 3 && this.plan && this.plan.best && !this.plan.goAround) {
+        const key = guidanceKeyOf(this.plan.best);
+        if (key !== this.guidanceKey) {
+          this.guidanceKey = key;
+          const d = CA.describe(this.plan.best, own);
+          this.emit('change', d.text, { voiceFull: d.voice, voiceTraffic: null });
+        }
+      }
+      if (level < 2 && this.level >= 2 && this.t > 1 && !this.autoAvoid) this.emit('clear', 'Clear of conflict', { voiceFull: 'Clear of conflict.', voiceTraffic: null });
+
+      // auto-avoid backup: if the pilot has not started a working escape in time, the system flies it
+      const autoMode = this.effectiveAuto();
+      if (level >= 3 && this.plan && this.plan.best && autoMode !== 'off') {
+        if (this.warnSince === null) this.warnSince = this.t;
+        // live board: the laptop decides the takeover, so keep the last-safe clock running and only report it
+        if (this.external || (!this.autoAvoid && !this.autoInhibit)) {
+          const ok = this.resolving();
+          const tGo = top ? top.tMin : (inc && this.final ? this.final.etaS : 99);
+          // calculated, not a fixed timer: the latest moment the chosen escape still works
+          if (!ok && !this.plan.goAround) {
+            // computed on the tick after the plan, so the two never land in the same frame
+            if (this.lsmT !== this.planT && (this.t - this.planT >= 0.2 || this.lastSafe0 === undefined)) {
+              this.lastSafe0 = CA.lastSafeMoment(own, this.plan, env, 16); this.lsmT = this.planT; this.lsmAt = this.t;
+            }
+            this.lastSafe = this.lastSafe0 === null || this.lastSafe0 === undefined ? null : Math.max(0, this.lastSafe0 - (this.t - (this.lsmAt || this.t)));
+            // live board: the sensor's speed estimate is noisy, so the countdown may only run down, never jump back up
+            if (this.external && this.lastSafe !== null) {
+              if (this.lsmFloor !== undefined && this.lsmFloor !== null) this.lastSafe = Math.min(this.lastSafe, Math.max(0, this.lsmFloor - (this.t - this.lsmFloorT)));
+              this.lsmFloor = this.lastSafe; this.lsmFloorT = this.t;
+            }
+          } else this.lastSafe = null;
+          const byDelay = Math.max(0, AUTO.delay - (this.t - this.warnSince));
+          const byLsm = this.lastSafe === null ? Infinity : Math.max(0, this.lastSafe - AUTO.lsmMargin);
+          this.autoCountdown = ok ? null : Math.min(byDelay, byLsm);
+          let reason = null;
+          if (autoMode === 'always') reason = 'auto-fly setting';
+          else if (!ok && byLsm <= 0) reason = 'last safe moment to start the escape';
+          else if (!ok && byDelay <= 0) reason = 'pilot did not act within ' + AUTO.delay + ' s';
+          else if (!ok && this.lastSafe === null && tGo <= AUTO.lastMoment) reason = 'last moment: conflict in ' + Math.max(0, tGo).toFixed(0) + ' s';
+          this.autoDue = this.external ? reason : null;
+          if (reason && this.external) {
+            this.autoCountdown = this.autoAvoid ? null : this.autoCountdown;
+          } else if (reason) {
+            this.autoAvoid = { since: this.t, reason };
+            this.autoCountdown = null;
+            if (st.autoT === null) { st.autoT = this.t; st.autoReason = reason; }
+            const d = this.plan.goAround ? { voice: 'Go around.' } : CA.describe(this.plan.best, own);
+            if (autoMode !== 'always') this.emit('auto', 'Auto avoid engaged: ' + reason, { voiceFull: 'Auto avoid. ' + d.voice, voiceTraffic: null });
+          }
+        }
+      } else {
+        this.warnSince = null; this.autoCountdown = null; this.autoDue = null; this.lastSafe = null; this.lsmFloor = null;
+        this.lastSafe0 = undefined; this.lsmAt = undefined;      // a new encounter starts with a fresh last-safe search
+        if (this.autoAvoid && level < 3 && !this.external) {
+          this.autoAvoid = null;
+          if (autoMode !== 'always') this.emit('autoOff', 'Clear of conflict. You have control.', { voiceFull: 'Clear of conflict. You have control.', voiceTraffic: null });
+        }
+        if (level < 2) this.autoInhibit = false;
+      }
+      this.level = level; this.classic = classic;
+    }
+
+    end(reason) {
+      if (this.ended) return;
+      if (this.external) {                     // live models keep running; just report it once in a while
+        if (!this.lastEndNote || this.t - this.lastEndNote > 20) { this.lastEndNote = this.t; this.emit('note', reason); }
+        return;
+      }
+      this.ended = true; this.endReason = reason;
+      this.emit('end', reason);
+    }
+
+    result() {
+      const st = this.stats, c = st.closest;
+      return {
+        scenario: this.scn.key, mode: this.mode.key, pilot: this.pilot,
+        outcome: st.collision ? 'Collision' : st.cfit ? 'Terrain' : st.nmac ? 'Near miss' : 'Safe',
+        closestFt: isFinite(c.dh) ? Math.round(c.dh / FT) : null,
+        closestVertFt: isFinite(c.dv) ? Math.round(c.dv / FT) : null,
+        alertT: st.firstAlertT, warnT: st.firstWarnT, classicT: st.classicFirstT, classicWarnT: st.classicWarnT,
+        reactionS: st.firstInputT !== null && st.firstAlertT !== null ? +(st.firstInputT - st.firstAlertT).toFixed(1) : null,
+        firstMove: st.firstMove, firstMoveStatus: st.firstMoveStatus, goAround: st.goAround, end: this.endReason,
+        autoT: st.autoT, autoReason: st.autoReason, autoDisconnected: st.autoDisconnected,
+      };
+    }
+  }
+
+  root.SIM = { Sim, MODES, AUTO, clockWords };
+})(typeof window !== 'undefined' ? window : globalThis);
+
+</script>
+<script>
+// app.js : 3D synthetic-vision display, HUD panels, voice, inputs, live feed and runway station link.
+(function () {
+  'use strict';
+  const { CA, SCN, SIM, THREE } = window;
+  const { FT, NM, KT, FPM, D2R } = CA;
+  const $ = (id) => document.getElementById(id);
+  const fmt = (x) => Math.round(x).toLocaleString('en-US');
+  const pad3 = (x) => String(Math.round(CA.wrap360(x)) % 360 || 360).padStart(3, '0');
+  const store = {
+    get(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch (e) { /* storage unavailable */ } },
+  };
+
+  const LIVE_AIRPORTS = [
+    { key: 'PHX', name: 'Phoenix Sky Harbor', lat: 33.4343, lon: -112.0116, elevFt: 1135 },
+    { key: 'DVT', name: 'Phoenix Deer Valley', lat: 33.6883, lon: -112.0826, elevFt: 1478 },
+    { key: 'FFZ', name: 'Mesa Falcon Field', lat: 33.4608, lon: -111.7283, elevFt: 1394 },
+    { key: 'CHD', name: 'Chandler Municipal', lat: 33.2691, lon: -111.8111, elevFt: 1243 },
+    { key: 'SDL', name: 'Scottsdale', lat: 33.6229, lon: -111.9105, elevFt: 1510 },
+  ];
+
+  const S = {
+    scenario: 'headon', mode: 'full', autopilot: false, attract: true, paused: false, speed: 1,
+    view: 'chase', vScale: 2, sound: true, rangeNm: 3, served: false, station: null, feed: null,
+    results: store.get('ted.results', []), runId: store.get('ted.runId', 0),
+    cam: { az: 0, el: 16, dist: 300, orbitAz: 200, orbitEl: 22, topDist: 9000 },
+    live: null, adopt: null, countdown: 0,
+    auto: store.get('ted.auto', 'backup'), ui: store.get('ted.ui', 'pilot'), lightStyle: store.get('ted.lightStyle', 'B'),
+    tabletop: false, tt: null, ttFeed: null, lastIntentKey: '', lastIntentT: 0,
+  };
+  let sim = null;
+
+  // ---------------------------------------------------------------- three.js scene
+  const canvas = $('scene');
+  let renderer;
+  try { renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' }); }
+  catch (e) { $('nogl').hidden = false; return; }
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  const scene = new THREE.Scene();
+  const HORIZON = new THREE.Color('#3b6e98');
+  scene.fog = new THREE.Fog(HORIZON, 18000, 75000);
+  const camera = new THREE.PerspectiveCamera(55, 1, 5, 200000);
+  scene.add(new THREE.HemisphereLight(0xcfe4ff, 0x3a2e20, 0.85));
+  const sun = new THREE.DirectionalLight(0xffffff, 0.75); sun.position.set(-0.5, 1, 0.4); scene.add(sun);
+
+  const sky = new THREE.Mesh(new THREE.SphereGeometry(150000, 32, 16), new THREE.ShaderMaterial({
+    side: THREE.BackSide, depthWrite: false, fog: false,
+    uniforms: { top: { value: new THREE.Color('#06152a') }, horizon: { value: HORIZON }, ground: { value: new THREE.Color('#2a2219') } },
+    vertexShader: 'varying vec3 vP; void main(){ vP = normalize(position); gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }',
+    fragmentShader: 'uniform vec3 top; uniform vec3 horizon; uniform vec3 ground; varying vec3 vP; void main(){ float h = vP.y; vec3 c = h > 0.0 ? mix(horizon, top, pow(min(h*1.5,1.0),0.6)) : mix(horizon, ground, min(-h*8.0,1.0)); gl_FragColor = vec4(c,1.0); }',
+  }));
+  sky.renderOrder = -1; scene.add(sky);
+
+  const world = new THREE.Group(); scene.add(world);
+  let terrainObj = null, gridObj = null, runwayObj = null, runwayAlert = null;
+
+  function field() { return sim ? sim.env.fieldElev : SCN.FIELD; }
+  function W(e, n, u, out) { (out || (out = new THREE.Vector3())).set(e, (u - field()) * S.vScale, -n); return out; }
+
+  function disposeObj(o) {
+    if (!o) return;
+    o.traverse((c) => { if (c.geometry) c.geometry.dispose(); if (c.material) { (Array.isArray(c.material) ? c.material : [c.material]).forEach((m) => { if (m.map) m.map.dispose(); m.dispose(); }); } });
+    if (o.parent) o.parent.remove(o);
+  }
+
+  function buildTerrain(env) {
+    disposeObj(terrainObj); disposeObj(gridObj);
+    const size = 64000, seg = 200;
+    const geo = new THREE.PlaneGeometry(size, size, seg, seg); geo.rotateX(-Math.PI / 2);
+    const pos = geo.attributes.position, col = new Float32Array(pos.count * 3);
+    const low = new THREE.Color('#8c7656'), mid = new THREE.Color('#6d5a41'), high = new THREE.Color('#4a3d30'), c = new THREE.Color();
+    for (let i = 0; i < pos.count; i++) {
+      const e = pos.getX(i), n = -pos.getZ(i), h = env.terrain(e, n), rel = h - env.fieldElev;
+      pos.setY(i, rel * S.vScale);
+      const t = Math.min(1, Math.max(0, rel / 900));
+      if (t < 0.5) c.copy(low).lerp(mid, t * 2); else c.copy(mid).lerp(high, (t - 0.5) * 2);
+      const j = 0.035 * (Math.sin(e * 0.0021) * Math.cos(n * 0.0017) + Math.sin((e + n) * 0.0009));
+      col[i * 3] = c.r + j; col[i * 3 + 1] = c.g + j; col[i * 3 + 2] = c.b + j * 0.6;
+    }
+    geo.setAttribute('color', new THREE.BufferAttribute(col, 3)); geo.computeVertexNormals();
+    terrainObj = new THREE.Mesh(geo, new THREE.MeshLambertMaterial({ vertexColors: true }));
+    world.add(terrainObj);
+    // 1 km grid draped on the terrain (synthetic vision style)
+    const pts = [], step = 1000, half = 30000, ds = 400;
+    for (let k = -half; k <= half; k += step) {
+      for (let s = -half; s < half; s += ds) {
+        pts.push(s, (env.terrain(s, k) - env.fieldElev) * S.vScale + 3, -k, s + ds, (env.terrain(s + ds, k) - env.fieldElev) * S.vScale + 3, -k);
+        pts.push(k, (env.terrain(k, s) - env.fieldElev) * S.vScale + 3, -s, k, (env.terrain(k, s + ds) - env.fieldElev) * S.vScale + 3, -(s + ds));
+      }
+    }
+    const g2 = new THREE.BufferGeometry(); g2.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+    gridObj = new THREE.LineSegments(g2, new THREE.LineBasicMaterial({ color: 0x1b140d, transparent: true, opacity: 0.35 }));
+    world.add(gridObj);
+  }
+
+  function textTexture(text, w, h, font, color) {
+    const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+    const g = cv.getContext('2d'); g.fillStyle = color; g.font = font; g.textAlign = 'center'; g.textBaseline = 'middle'; g.fillText(text, w / 2, h / 2);
+    const tx = new THREE.CanvasTexture(cv); tx.anisotropy = 4; return tx;
+  }
+
+  function buildRunway(env) {
+    disposeObj(runwayObj); runwayObj = null; runwayAlert = null;
+    const rwy = env.runway; if (!rwy) return;
+    const g = new THREE.Group();
+    const flat = (w, l, color, along, cross, y, rot) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(w, l), new THREE.MeshBasicMaterial({ color, fog: true }));
+      m.rotation.x = -Math.PI / 2; const p = SCN.rwyPoint(rwy, along, cross);
+      m.position.set(p.e, y, -p.n); m.rotation.z = -(rwy.hdg + (rot || 0)) * D2R; g.add(m); return m;
+    };
+    flat(rwy.width, rwy.length, 0x2b2f33, rwy.length / 2, 0, 1.2);
+    for (let a = 120; a < rwy.length - 120; a += 60) flat(1.2, 30, 0xe9edf0, a, 0, 1.6);
+    for (let i = -3; i <= 3; i++) { if (i === 0) continue; flat(1.8, 30, 0xe9edf0, 25, i * 5, 1.6); flat(1.8, 30, 0xe9edf0, rwy.length - 25, i * 5, 1.6); }
+    // taxiway crossing with hold-short lines
+    flat(23, 260, 0x34383c, rwy.taxiAlong, -(rwy.width / 2 + 130), 1.1, 90);
+    flat(23, 260, 0x34383c, rwy.taxiAlong, (rwy.width / 2 + 130), 1.1, 90);
+    flat(23, 1.2, 0xf2c230, rwy.taxiAlong, -(rwy.width / 2 + 40), 1.7, 90 + 90);
+    flat(23, 1.2, 0xf2c230, rwy.taxiAlong, (rwy.width / 2 + 40), 1.7, 90 + 90);
+    const num = (txt, along, rot) => {
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(18, 18), new THREE.MeshBasicMaterial({ map: textTexture(txt, 128, 128, 'bold 96px B612, sans-serif', '#e9edf0'), transparent: true }));
+      m.rotation.x = -Math.PI / 2; const p = SCN.rwyPoint(rwy, along, 0); m.position.set(p.e, 1.8, -p.n); m.rotation.z = -(rwy.hdg + rot) * D2R; g.add(m);
+    };
+    num(rwy.name, 70, 0); num(rwy.recip, rwy.length - 70, 180);
+    runwayAlert = flat(rwy.width + 12, rwy.length, 0xff3030, rwy.length / 2, 0, 2.2);
+    runwayAlert.material.transparent = true; runwayAlert.material.opacity = 0; runwayAlert.material.depthWrite = false;
+    runwayObj = g; world.add(g);
+  }
+
+  const LEVEL_HEX_EARLY = ['#9fe6f5', '#3fd0e8', '#ffb627', '#ff4d4d'];
+  // ---------- aircraft models (generic, not any real type) ----------
+  function std(color, emissive) { return new THREE.MeshStandardMaterial({ color, emissive: emissive || 0x000000, roughness: 0.55, metalness: 0.15 }); }
+  function makeModel(kind, isOwn) {
+    const g = new THREE.Group(); g.rotation.order = 'YXZ';
+    const body = std(isOwn ? 0xf4f7fa : 0xbfeaf5), trim = std(isOwn ? 0x3fd0e8 : 0x2a6f80);
+    const add = (geo, mat, x, y, z) => { const m = new THREE.Mesh(geo, mat); m.position.set(x, y, z); g.add(m); return m; };
+    if (kind === 'helo') {
+      const b = add(new THREE.SphereGeometry(1, 16, 12), body, 0, 0, 0); b.scale.set(1.5, 1.4, 2.8);
+      const boom = add(new THREE.CylinderGeometry(0.25, 0.4, 7, 8), body, 0, 0.3, 5.5); boom.rotation.x = Math.PI / 2;
+      add(new THREE.BoxGeometry(0.15, 1.8, 1.0), trim, 0, 1.0, 9);
+      const rotor = add(new THREE.CircleGeometry(7.5, 32), new THREE.MeshBasicMaterial({ color: 0xd8e6ee, transparent: true, opacity: 0.22, side: THREE.DoubleSide, depthWrite: false }), 0, 1.8, 0);
+      rotor.rotation.x = -Math.PI / 2;
+      add(new THREE.BoxGeometry(0.15, 0.15, 4.5), trim, -1.2, -1.6, 0); add(new THREE.BoxGeometry(0.15, 0.15, 4.5), trim, 1.2, -1.6, 0);
+      g.userData.mats = [body, trim]; g.userData.size = 15;
+    } else if (kind === 'truck') {
+      add(new THREE.BoxGeometry(3, 3.2, 10), std(0xd8322a), 0, 1.8, 0);
+      add(new THREE.BoxGeometry(2.6, 0.4, 0.6), std(0xffffff, 0x664400), 0, 3.6, -3.2);
+      g.userData.mats = []; g.userData.size = 10;
+    } else {
+      const jet = kind === 'jet', k = jet ? 2.6 : 1;
+      const fus = add(new THREE.CylinderGeometry(0.45 * k, 0.75 * k, 8 * k, 12), body, 0, 0, 0); fus.rotation.x = -Math.PI / 2;
+      const nose = add(new THREE.ConeGeometry(0.45 * k, 1.4 * k, 12), body, 0, 0, -4.7 * k); nose.rotation.x = -Math.PI / 2;
+      add(new THREE.BoxGeometry(11 * k, 0.16 * k, 1.6 * k), trim, 0, (jet ? -0.35 : 0.55) * k, -0.6 * k);
+      add(new THREE.BoxGeometry(3.6 * k, 0.12 * k, 1.0 * k), trim, 0, 0.1 * k, 3.6 * k);
+      add(new THREE.BoxGeometry(0.14 * k, 1.7 * k, 1.3 * k), trim, 0, 0.9 * k, 3.6 * k);
+      if (jet) { for (const s of [-1, 1]) { const en = add(new THREE.CylinderGeometry(0.55 * k, 0.55 * k, 2.2 * k, 10), trim, s * 2.6 * k, -0.9 * k, -1.2 * k); en.rotation.x = Math.PI / 2; } }
+      g.userData.mats = [body, trim]; g.userData.size = jet ? 30 : 11;
+    }
+    return g;
+  }
+
+  function makeLabel() {
+    const cv = document.createElement('canvas'); cv.width = 320; cv.height = 112;
+    const tx = new THREE.CanvasTexture(cv);
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: tx, depthTest: false, transparent: true, sizeAttenuation: false }));
+    sp.renderOrder = 10; sp.userData = { cv, tx, key: '' };
+    return sp;
+  }
+  function drawLabel(sp, lines, color) {
+    const key = lines.join('|') + color; if (sp.userData.key === key) return; sp.userData.key = key;
+    const g = sp.userData.cv.getContext('2d'); g.clearRect(0, 0, 320, 112);
+    g.fillStyle = 'rgba(5,9,13,0.72)'; g.strokeStyle = color; g.lineWidth = 3;
+    const w = 300, h = 28 + 30 * (lines.length - 1);
+    g.beginPath(); g.rect(10, 4, w, h + 8); g.fill(); g.stroke();
+    g.fillStyle = color; g.font = 'bold 26px "B612 Mono", monospace'; g.textBaseline = 'top';
+    g.fillText(lines[0], 22, 10);
+    g.font = '24px "B612 Mono", monospace'; g.fillStyle = '#e6edf2';
+    for (let i = 1; i < lines.length; i++) g.fillText(lines[i], 22, 10 + 30 * i);
+    sp.userData.tx.needsUpdate = true;
+  }
+
+  // TCAS symbology as constant-size billboards: hollow diamond, filled diamond, amber circle, red square
+  const SYMBOL_TEX = [0, 1, 2, 3].map((lv) => {
+    const cv = document.createElement('canvas'); cv.width = cv.height = 64; const g = cv.getContext('2d');
+    g.fillStyle = LEVEL_HEX_EARLY[lv]; g.strokeStyle = LEVEL_HEX_EARLY[lv]; g.lineWidth = 6; g.beginPath();
+    if (lv === 3) { g.rect(12, 12, 40, 40); g.fill(); }
+    else if (lv === 2) { g.arc(32, 32, 20, 0, Math.PI * 2); g.fill(); }
+    else { g.moveTo(32, 6); g.lineTo(56, 32); g.lineTo(32, 58); g.lineTo(8, 32); g.closePath(); if (lv === 1) g.fill(); else g.stroke(); }
+    const t = new THREE.CanvasTexture(cv); return t;
+  });
+  function makeSymbol() {
+    const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: SYMBOL_TEX[0], depthTest: false, transparent: true, sizeAttenuation: false }));
+    sp.renderOrder = 9; sp.scale.set(0.028, 0.028, 1); return sp;
+  }
+
+  function makeLine(color, dashed, opacity) {
+    const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(3 * 130), 3)); geo.setDrawRange(0, 0);
+    const mat = dashed ? new THREE.LineDashedMaterial({ color, dashSize: 40, gapSize: 28, transparent: true, opacity: opacity || 0.9 })
+      : new THREE.LineBasicMaterial({ color, transparent: true, opacity: opacity || 0.9 });
+    const l = new THREE.Line(geo, mat); l.frustumCulled = false; return l;
+  }
+  const tmpV = new THREE.Vector3();
+  function setLineFromTrack(line, tr, maxT) {
+    const pos = line.geometry.attributes.position; const kmax = Math.min(tr.steps, Math.round(maxT / tr.dt), 129); let i = 0;
+    for (let k = 0; k <= kmax; k += 1) { W(tr.E[k], tr.N[k], tr.U[k], tmpV); pos.setXYZ(i++, tmpV.x, tmpV.y, tmpV.z); }
+    pos.needsUpdate = true; line.geometry.setDrawRange(0, i); line.geometry.computeBoundingSphere();
+    if (line.material.isLineDashedMaterial) line.computeLineDistances();
+  }
+  function setLinePts(line, pts) {
+    const pos = line.geometry.attributes.position; let i = 0;
+    for (const p of pts) pos.setXYZ(i++, p.x, p.y, p.z);
+    pos.needsUpdate = true; line.geometry.setDrawRange(0, i); line.geometry.computeBoundingSphere();
+    if (line.material.isLineDashedMaterial) line.computeLineDistances();
+  }
+
+  // ---------- per-scenario objects ----------
+  let ownObj = null, ownPath = null, actors = new Map(), escapeLines = [], escapeTube = null, escapeArrow = null, conflictMarker = null;
+  const LEVEL_HEX = ['#9fe6f5', '#3fd0e8', '#ffb627', '#ff4d4d'];
+  const LEVEL_NUM = [0x9fe6f5, 0x3fd0e8, 0xffb627, 0xff4d4d];
+  const STATUS_NUM = [0x3ddc84, 0xffb627, 0xff4d4d];
+
+  function clearActors() {
+    for (const a of actors.values()) { disposeObj(a.group); disposeObj(a.label); disposeObj(a.drop); disposeObj(a.path); disposeObj(a.ring); if (a.sym.parent) a.sym.parent.remove(a.sym); a.sym.material.dispose(); }
+    actors.clear();
+    for (const l of escapeLines) disposeObj(l); escapeLines = [];
+    disposeObj(escapeTube); escapeTube = null; disposeObj(escapeArrow); escapeArrow = null;
+    disposeObj(ownObj); ownObj = null; disposeObj(ownPath); ownPath = null; disposeObj(conflictMarker); conflictMarker = null;
+  }
+
+  function ensureActor(ac) {
+    let a = actors.get(ac.id);
+    if (a) return a;
+    const group = makeModel(ac.kind, false);
+    const label = makeLabel();
+    const drop = makeLine(0x9fe6f5, false, 0.5);
+    const path = makeLine(0x9fe6f5, true, 0.85);
+    const ring = new THREE.Mesh(new THREE.RingGeometry(14, 22, 24), new THREE.MeshBasicMaterial({ color: 0x9fe6f5, transparent: true, opacity: 0.6, side: THREE.DoubleSide, depthWrite: false }));
+    ring.rotation.x = -Math.PI / 2;
+    const sym = makeSymbol();
+    world.add(group, label, drop, path, ring, sym);
+    a = { group, label, drop, path, ring, sym, ac };
+    actors.set(ac.id, a);
+    return a;
+  }
+
+  function setupScene() {
+    clearActors();
+    buildTerrain(sim.env); buildRunway(sim.env);
+    ownObj = makeModel(sim.own.kind, true); world.add(ownObj);
+    ownPath = makeLine(0x3fd0e8, false, 0.95); world.add(ownPath);
+    conflictMarker = new THREE.Mesh(new THREE.SphereGeometry(14, 18, 12), new THREE.MeshBasicMaterial({ color: 0xff3030, transparent: true, opacity: 0.9, depthWrite: false }));
+    conflictMarker.visible = false; world.add(conflictMarker);
+    for (let i = 0; i < 9; i++) { const l = makeLine(0x3ddc84, false, 0.55); escapeLines.push(l); world.add(l); }
+    snapCamera = true;
+  }
+  let snapCamera = true;
+
+  // ---------------------------------------------------------------- simulation control
+  function scenarioMeta(key) {
+    if (key === 'tabletop') return { key: 'tabletop', name: 'Live: model planes', short: 'Tabletop', blurb: 'Positions, heading, altitude and speed come from the overhead camera; roll and pitch from the MPU-6500 in our plane. The other plane has no system: its pilot reads our lights.' };
+    return key === 'live' ? { key: 'live', name: 'Live ADS-B: ' + S.live.airport.name, blurb: 'Real traffic from the ADS-B feed. You fly a virtual airplane among them, or click a row in the Traffic list to see the display from that airplane.' } : SCN.SCENARIOS.find((s) => s.key === key);
+  }
+
+  function buildSim(attract) {
+    let scn;
+    if (S.scenario === 'live') scn = buildLiveScenario();
+    else if (S.scenario === 'tabletop') scn = buildTabletopScenario();
+    else scn = SCN.build(S.scenario);
+    // with a physical runway station connected, the station replaces the scripted fire truck
+    if (S.scenario === 'incursion' && S.station && S.station.fresh) scn.traffic = scn.traffic.filter((a) => a.kind !== 'truck');
+    const external = S.scenario === 'tabletop';
+    sim = new SIM.Sim(scn, { mode: S.mode, autopilot: attract && !external, auto: S.auto, external, pilot: S.auto === 'always' ? 'auto' : 'you' });
+    sim.attract = attract && !external;
+    S.adopt = null;
+    setupScene();
+    const meta = scenarioMeta(S.scenario);
+    $('scnName').textContent = meta.name; $('scnBlurb').textContent = meta.blurb;
+    $('ownKind').textContent = CA.PERF[sim.own.kind].name;
+    if (!S.camKept) S.cam.az = 0;            // keep the viewer's saved camera angle
+    $('result').hidden = true;
+    lastSpoken = {};
+  }
+
+  function startRun() {
+    S.attract = false; S.paused = false;
+    buildSim(false);
+    S.countdown = 3; showCountdown();
+    if (S.sound) speak('Starting. Three, two, one.', 1, true);
+    $('pauseBtn').textContent = 'Pause';
+  }
+  function showCountdown() {
+    const el = $('countdown');
+    if (S.countdown <= 0) { el.hidden = true; return; }
+    el.hidden = false; el.textContent = String(Math.ceil(S.countdown));
+  }
+  function resetAttract() { S.attract = S.scenario !== 'tabletop'; S.countdown = 0; buildSim(true); prerollAttract(); }
+  function prerollAttract() {
+    // roll forward so the first frame already shows the conflict and the escape guidance
+    const target = { headon: 37, pattern: 21, helo: 37, terrain: 30, incursion: 46, live: 0 }[S.scenario] || 0;
+    while (sim.t < target && !sim.ended) sim.step(1 / 30);
+    sim.events.length = 0;
+  }
+
+  // ---------------------------------------------------------------- voice
+  let lastSpoken = {}; let speakingPrio = 0;
+  function speak(text, prio, force) {
+    if (!text || !S.sound || !('speechSynthesis' in window)) return;
+    const now = performance.now();
+    if (!force && lastSpoken[text] && now - lastSpoken[text] < 5000) return;
+    lastSpoken[text] = now;
+    try {
+      if (prio > speakingPrio || prio >= 3) window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(text); u.rate = 1.08; u.pitch = 1.0;
+      speakingPrio = prio; u.onend = () => { speakingPrio = 0; };
+      window.speechSynthesis.speak(u);
+    } catch (e) { /* speech not available */ }
+  }
+  function handleEvents() {
+    if (!sim.events.length) return;
+    const evs = sim.events.splice(0);
+    if (sim.attract) return;
+    for (const ev of evs) {
+      const v = wfActive() ? null : (S.mode === 'full' ? ev.voiceFull : ev.voiceTraffic);
+      if (ev.type === 'ta' && v) speak(v, 2);
+      else if ((ev.type === 'warn' || ev.type === 'change') && v) speak(v, 3);
+      else if (ev.type === 'clear' && v) speak(v, 1);
+      else if (ev.type === 'auto' && v) speak(v, 4);
+      else if (ev.type === 'autoOff' && v) speak(v, 2);
+      if (ev.type === 'end') finishRun();
+    }
+  }
+
+  // ---------------------------------------------------------------- results
+  function finishRun() {
+    if (sim.attract || sim.logged) return; sim.logged = true;
+    const r = sim.result(); S.runId += 1;
+    r.run = S.runId; r.time = new Date().toISOString();
+    if (S.scenario === 'live') r.scenario = 'live';
+    S.results.push(r); store.set('ted.results', S.results); store.set('ted.runId', S.runId);
+    showResult(r); renderResults();
+  }
+  function leadText(r) {
+    if (r.scenario === 'incursion') return r.warnT !== null ? 'Ground sensors saw it; TCAS cannot' : 'n/a';
+    if (r.warnT === null) return 'no warning';
+    if (r.classicWarnT === null) return 'straight-line logic never warned';
+    const d = r.classicWarnT - r.warnT; return (d >= 0 ? '+' : '') + d.toFixed(1) + ' s vs straight-line';
+  }
+  function showResult(r) {
+    const el = $('result');
+    el.className = r.outcome === 'Safe' ? 'good' : r.outcome === 'Near miss' ? 'warn' : 'bad';
+    $('resTitle').textContent = r.outcome === 'Safe' ? 'Safe' : r.outcome === 'Near miss' ? 'Near midair collision' : r.outcome === 'Terrain' ? 'Flew into terrain' : 'Collision';
+    const rows = [
+      ['Scenario', scenarioMeta(r.scenario) ? scenarioMeta(r.scenario).name : r.scenario],
+      ['Mode', SIM.MODES[r.mode].name + (r.pilot === 'auto' ? ' (auto-fly)' : '')],
+      ['Closest approach', r.closestFt !== null ? fmt(r.closestFt) + ' ft horizontal, ' + fmt(r.closestVertFt) + ' ft vertical' : (r.goAround ? 'Went around over the runway' : 'n/a')],
+      ['Reaction time', r.reactionS !== null ? r.reactionS + ' s after the first alert' : (r.pilot === 'auto' ? 'auto-fly' : 'no input')],
+      ['First move', r.firstMove ? r.firstMove + ' (' + r.firstMoveStatus + ')' : 'n/a'],
+      ['Warning lead', leadText(r)],
+      ['Auto-avoid', r.autoT !== null && r.autoT !== undefined ? 'took over at ' + r.autoT.toFixed(1) + ' s (' + r.autoReason + ')' + (r.autoDisconnected ? ', pilot disconnected it' : '') : 'not needed'],
+    ];
+    $('resList').innerHTML = rows.map((x) => '<dt>' + x[0] + '</dt><dd>' + x[1] + '</dd>').join('');
+    el.hidden = false;
+  }
+  function renderResults() {
+    $('runCount').textContent = S.results.length;
+    const body = $('resultsBody');
+    body.innerHTML = S.results.slice().reverse().map((r) => '<tr><td>' + r.run + '</td><td>' + (scenarioMeta(r.scenario) ? scenarioMeta(r.scenario).short || 'Live' : r.scenario) + '</td><td>' + SIM.MODES[r.mode].short + '</td><td>' + r.pilot + '</td><td>' + r.outcome + '</td><td>' + (r.closestFt !== null ? fmt(r.closestFt) + ' / ' + fmt(r.closestVertFt) + ' ft' : '') + '</td><td>' + (r.reactionS !== null ? r.reactionS + ' s' : '') + '</td><td>' + (r.firstMove ? r.firstMove + ' (' + r.firstMoveStatus + ')' : '') + '</td><td>' + leadText(r) + (r.autoT !== null && r.autoT !== undefined ? ' · auto-avoid ' + r.autoT.toFixed(0) + ' s' : '') + '</td></tr>').join('');
+    const by = {};
+    for (const r of S.results) { if (r.pilot === 'auto') continue; (by[r.mode] = by[r.mode] || []).push(r); }
+    const order = ['alert', 'tcas2d', 'full'];
+    $('sumBox').innerHTML = order.map((m) => {
+      const L = by[m] || []; if (!L.length) return '<div><b>' + SIM.MODES[m].name + '</b>no runs yet</div>';
+      const bad = L.filter((r) => r.outcome !== 'Safe').length;
+      const moves = L.filter((r) => r.firstMoveStatus && r.firstMoveStatus !== 'n/a');
+      const unsafe = moves.filter((r) => r.firstMoveStatus === 'unsafe').length;
+      const sep = L.filter((r) => r.closestFt !== null);
+      const avg = sep.length ? sep.reduce((s, r) => s + r.closestFt, 0) / sep.length : null;
+      const rt = L.filter((r) => r.reactionS !== null); const avgRt = rt.length ? rt.reduce((s, r) => s + r.reactionS, 0) / rt.length : null;
+      return '<div><b>' + SIM.MODES[m].name + '</b>' + L.length + ' runs · ' + bad + ' near miss or worse<br>first move into red: ' + (moves.length ? Math.round(100 * unsafe / moves.length) + '%' : 'n/a') + '<br>avg closest: ' + (avg !== null ? fmt(avg) + ' ft' : 'n/a') + ' · avg reaction: ' + (avgRt !== null ? avgRt.toFixed(1) + ' s' : 'n/a') + '</div>';
+    }).join('');
+  }
+  function csv() {
+    const cols = ['run', 'time', 'scenario', 'mode', 'pilot', 'outcome', 'closestFt', 'closestVertFt', 'reactionS', 'firstMove', 'firstMoveStatus', 'alertT', 'warnT', 'classicWarnT', 'goAround', 'autoT', 'autoReason'];
+    return [cols.join(',')].concat(S.results.map((r) => cols.map((c) => { const v = r[c]; return v === null || v === undefined ? '' : typeof v === 'number' ? (+v.toFixed(2)) : '"' + String(v).replace(/"/g, '""') + '"'; }).join(','))).join('\n');
+  }
+
+  // ---------------------------------------------------------------- HUD
+  const matrixEl = $('matrix');
+  const ROWS = ['Climb', 'Level', 'Descend'], COLS = ['Left', 'Straight', 'Right'];
+  matrixEl.innerHTML = '<div></div>' + COLS.map((c) => '<div class="hd">' + c + '</div>').join('') +
+    ROWS.map((r, i) => '<div class="hd rh">' + r + '</div>' + COLS.map((c, j) => '<div class="cell" id="cell' + i + j + '">-</div>').join('')).join('');
+
+  function reasonFor(c) {
+    if (!c) return '';
+    if (c.terrainStatus === 2 || (c.terrainStatus === 1 && c.trafficStatus < 1)) return 'terrain';
+    if (c.trafficStatus >= 1 && c.worstId) { const a = sim.traffic.find((x) => x.id === c.worstId); return a ? a.label : c.worstId; }
+    return '';
+  }
+
+  let hudTimer = 0;
+  function updateHud() {
+    const own = sim.own, mode = SIM.MODES[S.mode];
+    const agl = own.u - sim.env.terrain(own.e, own.n);
+    $('roHdg').textContent = pad3(own.psi) + '°';
+    $('roAlt').textContent = fmt(own.u / FT);
+    $('roVs').textContent = (own.vs >= 0 ? '+' : '') + fmt(Math.round(own.vs / FPM / 10) * 10);
+    $('roAgl').textContent = fmt(Math.max(0, agl / FT));
+    $('clock').textContent = 't = ' + sim.t.toFixed(1) + ' s' + (sim.attract ? '  (preview, press Start run)' : '');
+    $('modeName').textContent = mode.name + (sim.autopilot ? ' · preview auto-fly' : ' · auto-avoid ' + sim.effectiveAuto());
+
+    // banner + matrix
+    const banner = $('banner'), plan = sim.plan;
+    const airLvl = sim.threats.reduce((m, th) => Math.max(m, th.level), 0);
+    const lvl = mode.showGuidance ? sim.level : airLvl;   // today's systems cannot see the runway vehicle
+    let cls = 'clear', st = 'Clear', msg = 'No conflicts', sub = 'Watching ' + sim.threats.length + ' aircraft' + (sim.env.runway ? ', the runway' : '') + ' and terrain';
+    const top = sim.threats[0];
+    if (lvl >= 2) {
+      cls = 'traffic'; st = 'Traffic';
+      msg = sim.incursion && !top ? 'Runway traffic' : top ? ('Traffic ' + top.clock + " o'clock, " + (top.du > 300 * FT ? 'high' : top.du < -300 * FT ? 'low' : 'level') + ', ' + (top.range / NM).toFixed(1) + ' nm') : 'Traffic';
+      sub = top ? top.label + (top.hypLabel ? ' · predicted: ' + top.hypLabel : '') : '';
+    }
+    if (lvl >= 3 && mode.showGuidance && plan && plan.best) {
+      cls = 'escape';
+      if (plan.goAround) { st = 'Runway occupied'; msg = '<em>GO AROUND</em> · climb, runway heading ' + pad3(sim.env.runway.hdg); sub = (sim.incursion && sim.incursion.external ? 'Physical runway station reports a vehicle on the runway' : (sim.incursion ? sim.incursion.label + (sim.incursion.inside ? ' is on the runway' : ' will enter the runway in ' + sim.incursion.tEntry.toFixed(0) + ' s') : 'Runway blocked')) + ' · seen by ground sensors only'; }
+      else {
+        const d = CA.describe(plan.best, own); st = plan.noSafe ? 'Escape · no fully safe option' : 'Escape';
+        msg = '<em>' + d.text.replace('  ·  ', '</em> · <em>') + '</em>';
+        sub = 'Target stays fixed while you turn. ' + (plan.headOn ? 'Head-on: both turn right (14 CFR 91.113).' : '');
+      }
+      if (sim.autoAvoid && !sim.attract) {
+        cls = 'auto'; st = 'Auto avoid engaged';
+        sub = 'The system is flying the escape (' + sim.autoAvoid.reason + '). Press X to take control back.';
+      } else if (sim.autoCountdown !== null && sim.effectiveAuto() === 'backup' && !sim.attract) {
+        const lsm = sim.lastSafe !== null && sim.lastSafe !== undefined && sim.lastSafe - SIM.AUTO.lsmMargin <= sim.autoCountdown + 0.05;
+        sub = lsm ? 'Last safe moment to start this escape: ' + sim.lastSafe.toFixed(1) + ' s. Auto avoid takes over in ' + sim.autoCountdown.toFixed(1) + ' s.'
+                  : 'Act now. Auto avoid takes over in ' + sim.autoCountdown.toFixed(1) + ' s.';
+      }
+      if (plan.algo === 'cbf' && plan.best && !plan.goAround && S.ui === 'engineer') {
+        const b = plan.best;
+        sub += ' CBF-QP: pass ' + ({ L: 'left', S: 'ahead', R: 'right' })[b.branch.turn] + ' / ' + ({ C: 'above', H: 'level', D: 'below' })[b.branch.vert] + ', predicted miss ' + b.sMin.toFixed(2) + ' x protected zone' + (b.slack > 1e-3 ? ', barrier slack logged' : '') + '.';
+      }
+    } else if (lvl >= 3 && !mode.showGuidance) { st = 'Traffic'; msg = 'Traffic, traffic'; sub = 'This mode gives no escape guidance'; }
+    else if (lvl >= 2 && !mode.showGuidance) { msg = 'Traffic, traffic'; sub = mode.key === 'alert' ? 'Alert only: find it yourself' : 'Use the 2D map'; }
+    if (S.scenario === 'tabletop' && S.ttFeed && !S.ttFeed.ownSeen) { cls = 'traffic'; st = 'Camera'; msg = 'Our plane is not in view'; sub = 'Keep marker 1 face-up under the camera. ' + (S.ttFeed.err || ''); }
+    if (wfActive()) {
+      const b = S.wf.banner; cls = b.cls; st = b.state; msg = b.msg; sub = b.sub;
+      if (S.wf.level >= 2 && sim.plan && sim.plan.best && sim.plan.algo === 'cbf') {
+        const d = CA.describe(sim.plan.best, own);
+        msg = '<em>' + d.text.split('  ·  ').join('</em> · <em>') + '</em>';
+        if (!(S.wf.node && S.wf.node.auto)) sub = 'Calculated escape (collision-cone CBF-QP): predicted miss ' + sim.plan.best.sMin.toFixed(1) + 'x the protected zone. ' + (sub || '');
+      }
+    }
+    banner.className = cls;
+    banner.querySelector('.state').textContent = st; banner.querySelector('.msg').innerHTML = msg; $('bannerSub').textContent = sub;
+    const bar = $('autoBar');
+    if (wfActive()) {                       // live board: countdown to automatic avoid comes from demo.py
+      const n = S.wf.node || {}, bar = $('autoBar');
+      const live = n.auto_in !== null && n.auto_in !== undefined && !n.auto && S.wf.level >= 2;
+      bar.hidden = !live;
+      if (live) { bar.firstChild.style.width = Math.round(100 * (1 - Math.min(5, n.auto_in) / 5)) + '%'; $('bannerSub').textContent = 'Act now. Automatic avoid takes over in ' + n.auto_in.toFixed(1) + ' s (pitch the nose ' + (S.wf.sense.vert === 'D' ? 'down' : 'up') + ' to stay in control).'; }
+      if (n.auto) { banner.className = 'auto'; banner.querySelector('.state').textContent = 'Automatic avoid engaged'; $('bannerSub').textContent = 'The system is flying the escape. Press X, the Autopilot button, or tilt against it to take control.'; }
+    }
+    const counting = !wfActive() && lvl >= 3 && mode.showGuidance && sim.autoCountdown !== null && sim.effectiveAuto() === 'backup' && !sim.autoAvoid && !sim.attract;
+    bar.hidden = !counting;
+    if (counting) bar.firstChild.style.width = Math.round(100 * (1 - sim.autoCountdown / SIM.AUTO.delay)) + '%';
+    $('flash').className = wfActive() ? (S.wf.level >= 2 ? 'on' : S.wf.level === 1 ? 'amber' : '') : lvl >= 3 && mode.showGuidance ? 'on' : lvl >= 2 ? 'amber' : '';
+
+    const showM = mode.showGuidance && plan && plan.cells && lvl >= 2;
+    matrixEl.classList.toggle('idle', !(lvl >= 3 && plan && (plan.cells || plan.goAround) && mode.showGuidance));
+    $('alertPanel').querySelector('.legend').style.visibility = mode.showGuidance ? 'visible' : 'hidden';
+    matrixEl.style.display = mode.showGuidance ? '' : 'none';
+    for (let i = 0; i < 3; i++) for (let j = 0; j < 3; j++) {
+      const el = $('cell' + i + j);
+      const c = showM ? plan.cells[i][j] : null;
+      if (!c) { el.className = 'cell'; el.innerHTML = plan && plan.goAround && i === 0 && j === 1 && mode.showGuidance ? 'GO<small>around</small>' : '-'; if (plan && plan.goAround && i === 0 && j === 1 && mode.showGuidance) el.className = 'cell safe best'; continue; }
+      const best = plan.best && plan.best.row === i && plan.best.col === j && lvl >= 3;
+      el.className = 'cell ' + CA.STATUS[c.status] + (best ? ' best' : '');
+      const r = reasonFor(c);
+      el.innerHTML = (c.dpsi === 0 ? 'HDG ' : (c.dpsi < 0 ? '◂ ' : '') + '') + pad3(c.psi) + (c.dpsi > 0 ? ' ▸' : '') + '<small>' + (c.vs > 0 ? '+' : '') + c.vs + ' fpm' + (r && c.status > 0 ? ' · ' + r : '') + '</small>';
+    }
+
+    // TCAS comparison note
+    const note = $('tcasNote');
+    if (lvl >= 2 && own.kind === 'jet' && agl < 1000 * FT && !sim.incursion && airLvl >= 2) { note.hidden = false; note.textContent = 'TCAS here: "Traffic, traffic" only. Resolution advisories are inhibited below about 1,000 ft above ground.'; }
+    else if (sim.incursion && mode.showGuidance) { note.hidden = false; note.textContent = 'TCAS and ADS-B cannot see this vehicle (no transponder). Only the airport ground sensors can.'; }
+    else note.hidden = true;
+
+    // traffic list
+    const rows = [];
+    const list = sim.threats.slice(0, 12);
+    for (const th of list) {
+      const ra = th.du / FT;
+      rows.push('<tr class="lvl' + th.level + (S.scenario === 'live' ? ' pick' : '') + '" data-id="' + th.id + '"><td>' + th.label + '</td><td>' + th.clock + " o'clk</td><td>" + (th.range / NM).toFixed(1) + '</td><td>' + (ra >= 0 ? '+' : '') + fmt(Math.round(ra / 10) * 10) + (Math.abs(th.vsFpm) > 400 ? (th.vsFpm > 0 ? ' ↑' : ' ↓') : '') + '</td><td class="why">' + (th.hypLabel || '') + '</td></tr>');
+    }
+    if (sim.incursion && mode.showGuidance) rows.unshift('<tr class="lvl3"><td>' + sim.incursion.label + '</td><td>runway</td><td></td><td>ground</td><td class="why">' + (sim.incursion.inside ? 'on the runway' : 'entering in ' + sim.incursion.tEntry.toFixed(0) + ' s') + '</td></tr>');
+    $('trafficBody').innerHTML = mode.show3dTraffic || mode.showPlan ? rows.join('') : '<tr><td colspan="5" class="why">Hidden in alert-only mode</td></tr>';
+    $('trafficCount').textContent = sim.threats.length + ' tracked';
+    $('mapPanel').style.display = mode.showPlan ? '' : 'none';
+    updateTrafficCard(mode);
+  }
+
+  // One card about the aircraft that matters most (pilot view): no tables, no lists.
+  function updateTrafficCard(mode) {
+    const card = $('trafficCard');
+    const th = sim.threats.find((t) => t.level >= 1) || sim.threats[0];
+    if (S.ui !== 'pilot' || !th || !(mode.show3dTraffic || mode.showPlan)) { card.hidden = true; return; }
+    const ac = sim.traffic.find((a) => a.id === th.id);
+    card.hidden = false;
+    $('tcName').textContent = th.label;
+    $('tcPos').textContent = th.clock + " o'clock";
+    $('tcDist').textContent = (th.range / NM).toFixed(1) + ' nm';
+    const ra = Math.round(th.du / FT / 10) * 10;
+    $('tcAlt').textContent = (Math.abs(ra) < 100 ? 'same' : fmt(Math.abs(ra)) + (ra > 0 ? ' above' : ' below')) + (Math.abs(th.vsFpm) > 400 ? (th.vsFpm > 0 ? ' ↑' : ' ↓') : '');
+    $('tcSpd').textContent = ac ? fmt(ac.V / KT) + ' kt' : '-';
+    $('tcClose').textContent = th.closure > 0.5 ? fmt(th.closure / KT) + ' kt' : 'opening';
+    $('tcTime').textContent = th.level >= 2 && th.tMin < 60 ? Math.max(0, th.tMin).toFixed(0) + ' s' : '-';
+    const lv = th.level;
+    for (const id of ['tcDist', 'tcAlt', 'tcSpd', 'tcClose', 'tcTime']) $(id).style.color = lv >= 3 ? 'var(--red)' : lv === 2 ? 'var(--amber)' : 'var(--cyan)';
+    $('tcNext').textContent = 'Where it is going: ' + (th.hypLabel || 'straight') + (ac && !ac.broadcasting ? ' · no transponder' : '');
+  }
+
+  // ---------- intent lights (what our wingtips tell other pilots) ----------
+  function currentIntent() {
+    if (wfActive()) {
+      const w = S.wf, n = w.node || {};
+      if (w.level < 2 && !(n.stage >= 2)) return { mode: 'N' };
+      const auto = !!n.auto, tau = w.tau === null ? 15 : w.tau;
+      return { mode: 'E', turn: w.sense.turn, vert: w.sense.vert, hz: auto ? 8 : tau > 18 ? 2 : tau > 12 ? 4 : 6, auto: auto ? 1 : 0 };
+    }
+    const mode = SIM.MODES[S.mode];
+    if (!sim || !mode.showGuidance || sim.level < 3 || !sim.plan || !sim.plan.best) return { mode: 'N' };
+    const b = sim.plan.best;
+    const turn = b.dpsi > 0 ? 'R' : b.dpsi < 0 ? 'L' : 'S';
+    const vert = b.vs > 0 ? 'C' : b.vs < 0 ? 'D' : 'H';
+    const top = sim.threats[0], tGo = top ? top.tMin : 8;
+    const auto = !!(sim.autoAvoid && !sim.attract);
+    const hz = auto ? 8 : tGo > 15 ? 2 : tGo > 8 ? 4 : 6;
+    return { mode: 'E', turn, vert, hz, auto: auto ? 1 : 0 };
+  }
+  const LC = { red: '#ff3b3b', green: '#33e06f', white: '#ffffff', amber: '#ffa21a', orange: '#ff6a1a', blue: '#2f6bff', off: '#2a3a46' };
+  function renderLights(now) {
+    const it = currentIntent();
+    let L = LC.red, R = LC.green, T = LC.white, top = LC.off, bot = LC.off;
+    if (it.mode === 'N') {
+      top = now % 1000 < 90 ? LC.red : LC.off; bot = (now + 500) % 1000 < 90 ? LC.red : LC.off;
+    } else {
+      const period = 1000 / it.hz, on = now % period < period / 2;
+      if (S.lightStyle === 'B') { if (it.turn === 'L') L = on ? LC.amber : LC.red; if (it.turn === 'R') R = on ? LC.amber : LC.green; }
+      else { if (it.turn === 'L') L = on ? LC.orange : LC.off; if (it.turn === 'R') R = on ? LC.blue : LC.off; }
+      if (it.vert === 'C') top = on ? LC.white : LC.off;
+      if (it.vert === 'D') bot = on ? LC.white : LC.off;
+    }
+    $('lgL').setAttribute('fill', L); $('lgR').setAttribute('fill', R); $('lgT').setAttribute('fill', T);
+    $('lgTop').setAttribute('fill', top); $('lgBot').setAttribute('fill', bot);
+    const words = it.mode === 'N' ? 'Normal position lights' :
+      (it.auto ? 'AUTO AVOID: ' : '') + (it.turn === 'L' ? 'turning LEFT' : it.turn === 'R' ? 'turning RIGHT' : 'holding heading') + ', ' +
+      (it.vert === 'C' ? 'CLIMBING' : it.vert === 'D' ? 'DESCENDING' : 'holding altitude') + ' · ' + it.hz + ' flashes/s';
+    if ($('lightsText').textContent !== words) $('lightsText').textContent = words;
+    return it;
+  }
+  async function postIntent(now) {
+    if (!S.tabletop || !sim || S.scenario !== 'tabletop') return;
+    const it = currentIntent(); it.style = S.lightStyle;
+    const key = JSON.stringify(it);
+    if (key === S.lastIntentKey && now - S.lastIntentT < 1000) return;
+    S.lastIntentKey = key; S.lastIntentT = now;
+    try { await fetch('/api/intent', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: key }); } catch (e) { /* hub gone */ }
+  }
+
+  // ---------- 2D traffic map (TCAS-style symbols, heading up) ----------
+  const plan = $('plan'), pg = plan.getContext('2d');
+  function drawPlan() {
+    const Wd = plan.width, Hd = plan.height, cx = Wd / 2, cy = Hd * 0.56, R = Wd * 0.42;
+    const own = sim.own, scale = R / (S.rangeNm * NM);
+    pg.clearRect(0, 0, Wd, Hd); pg.fillStyle = '#05090d'; pg.fillRect(0, 0, Wd, Hd);
+    const sp = Math.sin(own.psi * D2R), cp = Math.cos(own.psi * D2R);
+    // heading up: forward = along our heading, right = 90 degrees clockwise from it
+    const toXY = (e, n) => { const de = e - own.e, dn = n - own.n; const fwd = de * sp + dn * cp, right = de * cp - dn * sp; return [cx + right * scale, cy - fwd * scale]; };
+    // range rings
+    pg.strokeStyle = '#2c3f50'; pg.lineWidth = 2; pg.setLineDash([4, 10]);
+    for (const rr of [1, S.rangeNm]) { pg.beginPath(); pg.arc(cx, cy, rr * NM * scale, 0, Math.PI * 2); pg.stroke(); }
+    pg.setLineDash([]);
+    // compass arc
+    pg.strokeStyle = '#8ea3b2'; pg.fillStyle = '#8ea3b2'; pg.font = '20px "B612 Mono", monospace'; pg.textAlign = 'center'; pg.textBaseline = 'middle';
+    for (let h = 0; h < 360; h += 10) {
+      const rel = CA.angDiff(h, own.psi); if (Math.abs(rel) > 70) continue;
+      const a = (rel - 90) * D2R, r1 = R + 6, r2 = R + (h % 30 === 0 ? 20 : 12);
+      pg.beginPath(); pg.moveTo(cx + r1 * Math.cos(a), cy + r1 * Math.sin(a)); pg.lineTo(cx + r2 * Math.cos(a), cy + r2 * Math.sin(a)); pg.stroke();
+      if (h % 30 === 0) pg.fillText(String(h / 10), cx + (R + 38) * Math.cos(a), cy + (R + 38) * Math.sin(a));
+    }
+    // runway
+    const rwy = sim.env.runway;
+    const mode = SIM.MODES[S.mode];
+    if (rwy) { const a = toXY(rwy.thr.e, rwy.thr.n), b = toXY(rwy.far.e, rwy.far.n); pg.strokeStyle = sim.incursion && mode.showGuidance ? '#ff4d4d' : '#c9d3da'; pg.lineWidth = 6; pg.beginPath(); pg.moveTo(a[0], a[1]); pg.lineTo(b[0], b[1]); pg.stroke(); }
+    // escape target heading bug + safe direction
+    if (mode.showGuidance && sim.level >= 3 && sim.plan && sim.plan.best) {
+      const rel = CA.angDiff(sim.plan.best.psi, own.psi), a = (rel - 90) * D2R;
+      pg.strokeStyle = 'rgba(61,220,132,0.9)'; pg.lineWidth = 5; pg.beginPath(); pg.moveTo(cx, cy); pg.lineTo(cx + R * 0.75 * Math.cos(a), cy + R * 0.75 * Math.sin(a)); pg.stroke();
+      pg.fillStyle = '#e45cf0'; pg.beginPath(); const bx = cx + (R + 8) * Math.cos(a), by = cy + (R + 8) * Math.sin(a);
+      pg.save(); pg.translate(bx, by); pg.rotate(a + Math.PI / 2); pg.rect(-12, -6, 24, 14); pg.restore(); pg.fill();
+    }
+    // traffic
+    for (const th of sim.threats) {
+      const ac = sim.traffic.find((x) => x.id === th.id); if (!ac) continue;
+      const [x, y] = toXY(ac.e, ac.n);
+      if (Math.hypot(x - cx, y - cy) > R + 30) continue;
+      const lv = th.level, s = 11;
+      pg.fillStyle = LEVEL_HEX[lv]; pg.strokeStyle = LEVEL_HEX[lv]; pg.lineWidth = 3;
+      pg.beginPath();
+      if (lv >= 3) { pg.rect(x - s, y - s, 2 * s, 2 * s); pg.fill(); }
+      else if (lv === 2) { pg.arc(x, y, s, 0, Math.PI * 2); pg.fill(); }
+      else { pg.moveTo(x, y - s * 1.2); pg.lineTo(x + s, y); pg.lineTo(x, y + s * 1.2); pg.lineTo(x - s, y); pg.closePath(); if (lv === 1) pg.fill(); else pg.stroke(); }
+      const ra = Math.round(th.du / FT / 100);
+      const tag = (ra >= 0 ? '+' : '-') + String(Math.abs(ra)).padStart(2, '0') + (Math.abs(th.vsFpm) > 500 ? (th.vsFpm > 0 ? '↑' : '↓') : '');
+      pg.font = '19px "B612 Mono", monospace'; pg.fillText(tag, x, ra >= 0 ? y - s - 14 : y + s + 16);
+    }
+    if (sim.incursion && !sim.incursion.external && mode.showGuidance) {
+      const v = sim.traffic.find((x) => x.id === sim.incursion.id);
+      if (v) { const [x, y] = toXY(v.e, v.n); pg.fillStyle = '#ff4d4d'; pg.fillRect(x - 7, y - 7, 14, 14); pg.font = '16px "B612 Mono", monospace'; pg.fillText('VEH', x, y + 22); }
+    }
+    // own ship
+    pg.fillStyle = '#ffffff'; pg.beginPath(); pg.moveTo(cx, cy - 16); pg.lineTo(cx + 11, cy + 12); pg.lineTo(cx, cy + 6); pg.lineTo(cx - 11, cy + 12); pg.closePath(); pg.fill();
+    pg.fillStyle = '#8ea3b2'; pg.font = '18px "B612 Mono", monospace'; pg.textAlign = 'left'; pg.fillText(S.rangeNm + ' NM', 12, Hd - 16);
+    pg.textAlign = 'right'; pg.fillText(pad3(own.psi) + '°', Wd - 12, Hd - 16);
+  }
+
+  // ---------------------------------------------------------------- 3D update
+  const camTarget = new THREE.Vector3(), camPos = new THREE.Vector3(), lookAhead = new THREE.Vector3();
+  const camFollow = { x: 0, y: 0, z: 0, has: false };
+  const panelEdge = { f: 0.5, t: 0, off: 0 };
+  function placeModel(obj, ac, isOwn) {
+    W(ac.e, ac.n, ac.u, obj.position);
+    if (ac.kind === 'truck') obj.position.y = (sim.env.terrain(ac.e, ac.n) - field()) * S.vScale + 0.5;
+    obj.rotation.y = -ac.psi * D2R;
+    obj.rotation.x = ac.kind === 'truck' ? 0 : ac.pitchDeg !== undefined ? ac.pitchDeg * D2R : Math.atan2(ac.vs * S.vScale, Math.max(ac.V, 1)) * 0.8;
+    obj.rotation.z = ac.kind === 'truck' ? 0 : ac.rollDeg !== undefined ? -ac.rollDeg * D2R : -Math.atan(ac.V * ac.omega * D2R / 9.81);
+    if (ac.noseDeg !== undefined) obj.rotation.y = -ac.noseDeg * D2R;
+    const dist = camera.position.distanceTo(obj.position);
+    const base = obj.userData.size || 11;
+    const want = isOwn ? Math.max(1, (dist / 260) * (11 / base)) : Math.max(1, (dist / 380) * (11 / base));
+    obj.scale.setScalar(Math.min(want, 90));
+  }
+
+  let lastPlanStamp = -1;
+  function update3D() {
+    const mode = SIM.MODES[S.mode], own = sim.own;
+    placeModel(ownObj, own, true);
+    if (sim.ownTrack) {
+      setLineFromTrack(ownPath, sim.ownTrack, 40);
+      ownPath.visible = true;
+      // Make the live ESP32 trajectory unmistakable.
+      ownPath.material.color.setHex(S.scenario === 'tabletop' ? 0x3fd0e8 : 0xffffff);
+      ownPath.material.opacity = S.scenario === 'tabletop' ? 0.95 : 0.55;
+    }
+    if (conflictMarker) conflictMarker.visible = false;
+    const seenIds = new Set();
+    for (const ac of sim.traffic) {
+      if (ac.crashed && ac.kind === 'truck') continue;
+      const a = ensureActor(ac); seenIds.add(ac.id);
+      const th = sim.threats.find((t) => t.id === ac.id);
+      const lv = th ? th.level : 0;
+      const visible = mode.show3dTraffic && (ac.broadcasting || ac.kind === 'truck');
+      a.group.visible = a.label.visible = a.drop.visible = a.ring.visible = visible; a.path.visible = visible && !!th;
+      a.sym.visible = visible && ac.kind !== 'truck';
+      if (!visible) continue;
+      placeModel(a.group, ac, false);
+      a.sym.position.copy(a.group.position);
+      if (a.sym.material.map !== SYMBOL_TEX[lv]) { a.sym.material.map = SYMBOL_TEX[lv]; a.sym.material.needsUpdate = true; }
+      const colr = ac.kind === 'truck' ? 0xff4d4d : LEVEL_NUM[lv];
+      for (const m of a.group.userData.mats) { m.color.setHex(colr); m.emissive.setHex(lv >= 2 ? colr : 0x000000); m.emissiveIntensity = lv >= 2 ? 0.35 : 0; }
+      a.drop.material.color.setHex(colr); a.path.material.color.setHex(colr); a.ring.material.color.setHex(colr);
+      const gy = (sim.env.terrain(ac.e, ac.n) - field()) * S.vScale + 4;
+      setLinePts(a.drop, [a.group.position, tmpV.set(a.group.position.x, gy, a.group.position.z)]);
+      a.ring.position.set(a.group.position.x, gy, a.group.position.z); a.ring.scale.setScalar(Math.max(1, a.group.scale.x * 0.6));
+      if (th && th.mainTrack) {
+        const intrTrack = th.worstTrack || th.mainTrack;
+        setLineFromTrack(a.path, intrTrack, 40);
+        if (S.scenario === 'tabletop') {
+          a.path.material.color.setHex(0xff4d4d);
+          a.path.material.opacity = 0.95;
+          // Predicted conflict point = closest predicted approach of the two tracks.
+          if (conflictMarker && sim.ownTrack) {
+            const n = Math.min(sim.ownTrack.steps, intrTrack.steps);
+            let best = Infinity, bk = 0;
+            for (let k = 0; k <= n; k++) {
+              const de = sim.ownTrack.E[k] - intrTrack.E[k];
+              const dn = sim.ownTrack.N[k] - intrTrack.N[k];
+              const du = sim.ownTrack.U[k] - intrTrack.U[k];
+              const d2 = de*de + dn*dn + du*du;
+              if (d2 < best) { best = d2; bk = k; }
+            }
+            const ce = (sim.ownTrack.E[bk] + intrTrack.E[bk]) * 0.5;
+            const cn = (sim.ownTrack.N[bk] + intrTrack.N[bk]) * 0.5;
+            const cu = (sim.ownTrack.U[bk] + intrTrack.U[bk]) * 0.5;
+            W(ce, cn, cu, conflictMarker.position);
+            conflictMarker.visible = true;
+            const pulse = 0.75 + 0.35 * Math.sin(performance.now() / 140);
+            conflictMarker.scale.setScalar(Math.max(0.7, pulse));
+          }
+        }
+      }
+      a.label.position.copy(a.group.position); a.label.position.y += 0.07 * camera.position.distanceTo(a.group.position);
+      const lab = ac.kind === 'truck' ? (ac.broadcasting ? [ac.label, 'ground vehicle', 'ADS-B'] : [ac.label, 'no transponder', 'ground sensor track']) : th ? [ac.label, (th.du >= 0 ? '+' : '') + fmt(Math.round(th.du / FT / 10) * 10) + ' ft' + (Math.abs(th.vsFpm) > 400 ? (th.vsFpm > 0 ? ' ↑' : ' ↓') : ''), (th.range / NM).toFixed(1) + ' nm  ' + fmt(ac.V / KT) + ' kt'] : [ac.label];
+      drawLabel(a.label, lab, ac.kind === 'truck' ? '#ff4d4d' : LEVEL_HEX[lv]);
+      const asp = camera.aspect || 1.6;
+      a.label.scale.set(0.21 * Math.min(1, 1.6 / asp), 0.074, 1);
+    }
+    for (const [id, a] of actors) if (!seenIds.has(id)) { disposeObj(a.group); disposeObj(a.label); disposeObj(a.drop); disposeObj(a.path); disposeObj(a.ring); if (a.sym.parent) a.sym.parent.remove(a.sym); a.sym.material.dispose(); actors.delete(id); }
+
+    // escape options in 3D
+    const plan = sim.plan, show = mode.showGuidance && plan && sim.level >= 3;
+    const stamp = plan ? sim.t : -1;
+    if (show && plan.cells && S.ui === 'engineer') {
+      let i = 0;
+      for (let r = 0; r < 3; r++) for (let c = 0; c < 3; c++) {
+        const cand = plan.cells[r][c], l = escapeLines[i++];
+        if (!cand || (plan.best && cand === plan.best)) { l.visible = false; continue; }
+        l.visible = true; l.material.color.setHex(STATUS_NUM[cand.status]); l.material.opacity = cand.status === 2 ? 0.75 : 0.5;
+        setLineFromTrack(l, cand.track, 35);
+      }
+    } else for (const l of escapeLines) l.visible = false;
+    if (show && plan.best && stamp !== lastPlanStamp) {
+      lastPlanStamp = stamp;
+      disposeObj(escapeTube); disposeObj(escapeArrow); escapeTube = escapeArrow = null;
+      let tr = plan.best.track;
+      if (!tr) tr = CA.predict(own, { type: 'maneuver', psi: plan.best.psi, vs: plan.best.vs * FPM, delay: 0 }, CA.PLAN.H, CA.PLAN.dt, sim.env);
+      const pts = []; for (let k = 6; k <= Math.min(tr.steps, 70); k += 2) pts.push(W(tr.E[k], tr.N[k], tr.U[k]));
+      if (pts.length > 3) {
+        const curve = new THREE.CatmullRomCurve3(pts);
+        const rad = Math.max(3, ownObj.scale.x * 2.2);
+        escapeTube = new THREE.Mesh(new THREE.TubeGeometry(curve, 60, rad, 8, false), new THREE.MeshBasicMaterial({ color: 0x3ddc84, transparent: true, opacity: 0.55, depthWrite: false }));
+        const end = pts[pts.length - 1], prev = pts[pts.length - 2];
+        escapeArrow = new THREE.Mesh(new THREE.ConeGeometry(rad * 2.6, rad * 6, 12), new THREE.MeshBasicMaterial({ color: 0x3ddc84 }));
+        escapeArrow.position.copy(end); escapeArrow.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), end.clone().sub(prev).normalize());
+        world.add(escapeTube, escapeArrow);
+      }
+    } else if (!show) { disposeObj(escapeTube); disposeObj(escapeArrow); escapeTube = escapeArrow = null; lastPlanStamp = -1; }
+
+    if (runwayAlert) runwayAlert.material.opacity = sim.incursion && mode.showGuidance ? 0.35 + 0.25 * Math.sin(performance.now() / 120) : 0;
+
+    // camera
+    const p = ownObj.position;
+    const fwd = new THREE.Vector3(Math.sin(own.psi * D2R), 0, -Math.cos(own.psi * D2R));
+    const other = sim.threats.length ? sim.traffic.find((a) => a.id === sim.threats[0].id) : null;
+    if (S.view === 'top') {
+      camTarget.copy(p); camPos.set(p.x, p.y + S.cam.topDist, p.z + 1);
+      camera.up.set(0, 0, -1);
+    } else if (S.view === 'overview') {
+      // frame our airplane and the most important other airplane together (good for an audience)
+      camera.up.set(0, 1, 0);
+      const q = other ? W(other.e, other.n, other.u) : p.clone();
+      const mid = p.clone().add(q).multiplyScalar(0.5);
+      const sep = p.distanceTo(q);
+      const dist = CA.clamp(sep * 1.25 + 500, 700, 14000) * (S.cam.dist / 300);
+      const az = S.cam.orbitAz, el = S.cam.orbitEl, ca = Math.cos(el * D2R);
+      camPos.set(mid.x + Math.sin(az * D2R) * dist * ca, mid.y + Math.sin(el * D2R) * dist, mid.z - Math.cos(az * D2R) * dist * ca);
+      camTarget.copy(mid);
+      const minY = (sim.env.terrain(camPos.x, -camPos.z) - field()) * S.vScale + 15; if (camPos.y < minY) camPos.y = minY;
+    } else {
+      camera.up.set(0, 1, 0);
+      const dist = S.cam.dist * Math.max(1, ownObj.scale.x * 0.55);
+      let az, el;
+      if (S.view === 'chase') { az = own.psi + 180 + S.cam.az; el = S.cam.el; } else { az = S.cam.orbitAz; el = S.cam.orbitEl; }
+      const ca = Math.cos(el * D2R);
+      camPos.set(p.x + Math.sin(az * D2R) * dist * ca, p.y + Math.sin(el * D2R) * dist, p.z - Math.cos(az * D2R) * dist * ca);
+      lookAhead.copy(fwd).multiplyScalar(S.view === 'chase' ? dist * 0.9 : 0);
+      camTarget.copy(p).add(lookAhead);
+      // live board in pilot view: aim a little above the airplane so it sits in the lower half of the
+      // screen, clear of the instruction panel at the top
+      if (S.view === 'chase' && S.scenario === 'tabletop' && S.ui === 'pilot') {
+        // put the airplane just below the panel's bottom edge, whatever the window size
+        const now = performance.now();
+        if (!panelEdge.t || now - panelEdge.t > 500) {
+          const pr = $('alertPanel').getBoundingClientRect(), cr = canvas.getBoundingClientRect();
+          panelEdge.f = cr.height > 0 ? CA.clamp((pr.bottom - cr.top) / cr.height, 0, 0.85) : 0.5; panelEdge.t = now;
+        }
+        const want = Math.min(0.9, Math.max(0.5, panelEdge.f + 0.1));   // screen fraction from the top
+        // feedback: measure where the airplane really is on screen and nudge the aim point
+        const v = p.clone().project(camera), have = (1 - v.y) / 2;
+        if (isFinite(have)) panelEdge.off = CA.clamp(panelEdge.off + (want - have) * dist * 0.4, 0, dist * 3);
+        camTarget.y += panelEdge.off;
+      } else panelEdge.off = 0;
+      const minY = (sim.env.terrain(camPos.x, -camPos.z) - field()) * S.vScale + 15; if (camPos.y < minY) camPos.y = minY;
+    }
+    // carry the camera with the airplane first, then ease it into place: a fast climb or descent
+    // (the automatic avoid) no longer leaves the camera behind, looking up at the belly
+    if (camFollow.has && S.view !== 'top') {
+      const dx = p.x - camFollow.x, dy = p.y - camFollow.y, dz = p.z - camFollow.z;
+      if (Math.abs(dx) + Math.abs(dy) + Math.abs(dz) < 2000) { camera.position.x += dx; camera.position.y += dy; camera.position.z += dz; }
+    }
+    camFollow.x = p.x; camFollow.y = p.y; camFollow.z = p.z; camFollow.has = true;
+    if (snapCamera) { camera.position.copy(camPos); snapCamera = false; }
+    else camera.position.lerp(camPos, S.view === 'top' ? 0.25 : 0.12);
+    camera.lookAt(camTarget);
+    sky.position.copy(camera.position);
+  }
+
+  // ---------------------------------------------------------------- input
+  const keys = new Set();
+  window.addEventListener('keydown', (e) => {
+    if (e.target && (e.target.tagName === 'SELECT' || e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    const k = e.key.toLowerCase();
+    if (['arrowleft', 'arrowright', 'arrowup', 'arrowdown', 'a', 'd', 'w', 's'].includes(k)) { keys.add(k); e.preventDefault(); }
+    if (k === 'enter') { startRun(); e.preventDefault(); }
+    if (k === 'r') resetAttract();
+    if (k === ' ') { togglePause(); e.preventDefault(); }
+    if (k === 'x' && wfActive()) wfPost('/api/override');
+    if (k === 'x' && sim) sim.disconnectAuto();
+  });
+  window.addEventListener('keyup', (e) => keys.delete(e.key.toLowerCase()));
+  window.addEventListener('blur', () => keys.clear());
+  const padPrev = {};
+  function readInput() {
+    let x = 0, y = 0;
+    if (keys.has('arrowleft') || keys.has('a')) x -= 1;
+    if (keys.has('arrowright') || keys.has('d')) x += 1;
+    if (keys.has('arrowup') || keys.has('w')) y += 1;
+    if (keys.has('arrowdown') || keys.has('s')) y -= 1;
+    let pads = [];
+    try { pads = navigator.getGamepads ? Array.from(navigator.getGamepads()).filter(Boolean) : []; } catch (e) { pads = []; }
+    for (const gp of pads) {
+      const dz = (v) => (Math.abs(v) < 0.15 ? 0 : v);
+      x += dz(gp.axes[0] || 0); y += -dz(gp.axes[1] || 0);
+      if (gp.axes.length > 3 && S.view !== 'top') { const rx = dz(gp.axes[2] || 0), ry = dz(gp.axes[3] || 0); if (S.view === 'chase') { S.cam.az += rx * 2.5; } else { S.cam.orbitAz += rx * 2.5; S.cam.orbitEl = CA.clamp(S.cam.orbitEl - ry * 1.5, 2, 85); } }
+      const pressed = (i) => gp.buttons[i] && gp.buttons[i].pressed;
+      const edge = (i) => { const p = pressed(i), was = padPrev[gp.index + ':' + i]; padPrev[gp.index + ':' + i] = p; return p && !was; };
+      if (edge(0)) startRun();
+      if (edge(1)) resetAttract();
+      if (edge(2)) cycleMode();
+      if (edge(3)) cycleView();
+      if (edge(9)) togglePause();
+      if ((edge(4) || edge(5)) && sim) sim.disconnectAuto();
+    }
+    if (!sim.attract && !sim.autopilot && !sim.external && S.countdown <= 0 && !S.adopt) sim.setInput(CA.clamp(x, -1, 1), CA.clamp(y, -1, 1));
+  }
+
+  // mouse orbit + zoom
+  let drag = null;
+  canvas.addEventListener('pointerdown', (e) => { drag = { x: e.clientX, y: e.clientY }; try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* pointer already gone */ } });
+  canvas.addEventListener('pointermove', (e) => {
+    if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag = { x: e.clientX, y: e.clientY };
+    if (S.view === 'chase') { S.cam.az += dx * 0.3; S.cam.el = CA.clamp(S.cam.el + dy * 0.2, 2, 80); }
+    else if (S.view === 'overview') { S.cam.orbitAz += dx * 0.3; S.cam.orbitEl = CA.clamp(S.cam.orbitEl + dy * 0.2, 5, 88); }
+  });
+  canvas.addEventListener('pointerup', () => { if (drag) keepCam(); drag = null; });
+  canvas.addEventListener('dblclick', () => resetCam());
+  // ---- zoom: f > 1 moves the camera away (zoom out), f < 1 moves it closer (zoom in)
+  function zoomBy(f) {
+    if (S.view === 'top') S.cam.topDist = CA.clamp(S.cam.topDist * f, 300, 40000);
+    else S.cam.dist = CA.clamp(S.cam.dist * f, 25, 6000);
+    keepCam();
+  }
+  function resetCam() { Object.assign(S.cam, { az: 0, el: 16, dist: 300, orbitAz: 200, orbitEl: 22, topDist: 9000 }); saveCam(); }
+  function keepCam() { S.camKept = true; saveCam(); }
+  let camSaveT = null;
+  function saveCam() { clearTimeout(camSaveT); camSaveT = setTimeout(() => { store.set('ted.cam', JSON.stringify(S.cam)); store.set('ted.view', S.view); }, 300); }
+  try { const c = JSON.parse(store.get('ted.cam', 'null')); if (c && typeof c === 'object') { for (const k of Object.keys(S.cam)) if (isFinite(c[k])) S.cam[k] = c[k]; S.camKept = true; } } catch (e) { /* first visit */ }
+  // mouse wheel, and a laptop trackpad pinch (the browser reports it as ctrl + wheel)
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    zoomBy(Math.exp(e.deltaY * (e.ctrlKey ? 0.01 : 0.0012)));
+  }, { passive: false });
+  // stop the browser zooming the whole page when someone pinches over a panel
+  document.addEventListener('wheel', (e) => { if (e.ctrlKey && $('stage').contains(e.target)) { e.preventDefault(); if (e.target !== canvas) zoomBy(Math.exp(e.deltaY * 0.01)); } }, { passive: false });
+  // touch screens: two fingers pinch to zoom (fingers apart = zoom in, together = zoom out) and move to turn
+  const touches = new Map(); let pinch = null;
+  canvas.addEventListener('pointerdown', (e) => { if (e.pointerType === 'touch') touches.set(e.pointerId, { x: e.clientX, y: e.clientY }); });
+  canvas.addEventListener('pointermove', (e) => {
+    if (e.pointerType !== 'touch' || !touches.has(e.pointerId)) return;
+    touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (touches.size !== 2) { pinch = null; return; }
+    const [a, b] = [...touches.values()];
+    const d = Math.hypot(a.x - b.x, a.y - b.y), mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2;
+    if (pinch && d > 0 && pinch.d > 0) {
+      zoomBy(pinch.d / d);
+      const dx = mx - pinch.mx, dy = my - pinch.my;
+      if (S.view === 'chase') { S.cam.az += dx * 0.3; S.cam.el = CA.clamp(S.cam.el + dy * 0.2, 2, 80); }
+      else if (S.view === 'overview') { S.cam.orbitAz += dx * 0.3; S.cam.orbitEl = CA.clamp(S.cam.orbitEl + dy * 0.2, 5, 88); }
+    }
+    pinch = { d, mx, my }; drag = null;          // two fingers: no single-finger drag at the same time
+  });
+  const endTouch = (e) => { touches.delete(e.pointerId); if (touches.size < 2) pinch = null; };
+  canvas.addEventListener('pointerup', endTouch); canvas.addEventListener('pointercancel', endTouch);
+  // Safari on a Mac trackpad sends gesture events for a pinch
+  let gScale = 1;
+  canvas.addEventListener('gesturestart', (e) => { e.preventDefault(); gScale = 1; });
+  canvas.addEventListener('gesturechange', (e) => { e.preventDefault(); if (e.scale > 0) { zoomBy(gScale / e.scale); gScale = e.scale; } });
+  $('zoomIn').addEventListener('click', () => zoomBy(0.8));
+  $('zoomOut').addEventListener('click', () => zoomBy(1.25));
+  $('camReset').addEventListener('click', () => resetCam());
+  $('camClose').addEventListener('click', () => { S.view = 'chase'; setSeg('viewSeg', 'view', 'chase'); Object.assign(S.cam, { az: 25, el: 12, dist: 45 }); keepCam(); });
+  window.addEventListener('keydown', (e) => {
+    if (/INPUT|SELECT|TEXTAREA/.test(document.activeElement && document.activeElement.tagName)) return;
+    if (e.key === '+' || e.key === '=') zoomBy(0.8);
+    if (e.key === '-' || e.key === '_') zoomBy(1.25);
+  });
+  setTimeout(() => { const h = $('camHint'); if (h) h.style.opacity = '0'; }, 7000);
+
+  // ---------------------------------------------------------------- toolbar wiring
+  const scnSel = $('scenarioSel');
+  function fillScenarios() {
+    if (S.liveOnly) { scnSel.innerHTML = '<option value="tabletop">LIVE: your board (IMU + TF-Luna)</option>'; scnSel.value = 'tabletop'; $('app').classList.add('tabletop'); return; }
+    scnSel.innerHTML = (S.tabletop ? '<option value="tabletop">Live: model planes</option>' : '') + SCN.SCENARIOS.map((s, i) => '<option value="' + s.key + '">' + (i + 1) + '. ' + s.name + '</option>').join('') +
+      (S.served ? '<optgroup label="Live ADS-B">' + LIVE_AIRPORTS.map((a) => '<option value="live:' + a.key + '">Live: ' + a.name + '</option>').join('') + '</optgroup>' : '');
+    scnSel.value = S.scenario === 'live' ? 'live:' + S.live.airport.key : S.scenario;
+    $('app').classList.toggle('tabletop', S.scenario === 'tabletop');
+  }
+  scnSel.addEventListener('change', () => {
+    const v = scnSel.value;
+    if (v.startsWith('live:')) { S.scenario = 'live'; S.live = { airport: LIVE_AIRPORTS.find((a) => a.key === v.slice(5)), ac: new Map() }; fetchFeed(); }
+    else S.scenario = v;
+    store.set('ted.scenario', S.scenario === 'live' || S.scenario === 'tabletop' ? 'headon' : S.scenario);
+    $('app').classList.toggle('tabletop', S.scenario === 'tabletop');
+    resetAttract();
+  });
+  function setSeg(segId, attr, val) { for (const b of $(segId).querySelectorAll('button')) b.setAttribute('aria-pressed', String(b.dataset[attr] === String(val))); }
+  $('modeSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; setMode(b.dataset.mode); });
+  function setMode(m) { S.mode = m; setSeg('modeSeg', 'mode', m); if (sim) sim.mode = SIM.MODES[m]; store.set('ted.mode', m); }
+  function cycleMode() { const order = ['full', 'tcas2d', 'alert']; setMode(order[(order.indexOf(S.mode) + 1) % 3]); }
+  $('speedSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.speed = +b.dataset.speed; setSeg('speedSeg', 'speed', S.speed); });
+  $('viewSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.view = b.dataset.view; setSeg('viewSeg', 'view', S.view); store.set('ted.view', S.view); });
+  function cycleView() { const order = ['chase', 'overview', 'top']; S.view = order[(order.indexOf(S.view) + 1) % 3]; setSeg('viewSeg', 'view', S.view); }
+  $('rangeSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.rangeNm = +b.dataset.range; setSeg('rangeSeg', 'range', S.rangeNm); });
+  $('startBtn').addEventListener('click', startRun);
+  $('resetBtn').addEventListener('click', resetAttract);
+  function togglePause() { S.paused = !S.paused; $('pauseBtn').textContent = S.paused ? 'Resume' : 'Pause'; }
+  $('pauseBtn').addEventListener('click', togglePause);
+  const autoSel = $('autoSel'); autoSel.value = S.auto;
+  const plannerSel = $('plannerSel');
+  plannerSel.value = store.get('ted.planner', 'cbf'); CA.setPlanner(plannerSel.value);
+  plannerSel.addEventListener('change', () => { CA.setPlanner(plannerSel.value); store.set('ted.planner', plannerSel.value); if (sim) { sim.plan = null; sim.planT = -99; } });
+  autoSel.addEventListener('change', () => {
+    S.auto = autoSel.value; store.set('ted.auto', S.auto);
+    if (S.tabletop) wfPost('/api/autopolicy', { mode: S.auto });
+    if (sim && !sim.attract) { sim.autoMode = S.auto; sim.pilot = S.auto === 'always' ? 'auto' : 'you'; sim.autoInhibit = false; }
+  });
+  function setUi(u) { S.ui = u; setSeg('uiSeg', 'ui', u); $('app').classList.toggle('pilot', u === 'pilot'); store.set('ted.ui', u); }
+  $('uiSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; setUi(b.dataset.ui); });
+  $('styleSeg').addEventListener('click', (e) => { const b = e.target.closest('button'); if (!b) return; S.lightStyle = b.dataset.style; setSeg('styleSeg', 'style', S.lightStyle); store.set('ted.lightStyle', S.lightStyle); });
+  $('zeroBtn').addEventListener('click', async () => { try { await fetch('/api/zero', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }); } catch (e) { /* hub gone */ } });
+  $('soundChk').addEventListener('change', (e) => { S.sound = e.target.checked; if (!S.sound && 'speechSynthesis' in window) window.speechSynthesis.cancel(); });
+  $('againBtn').addEventListener('click', startRun);
+  $('otherModeBtn').addEventListener('click', () => { cycleMode(); startRun(); });
+  $('closeResBtn').addEventListener('click', () => { $('result').hidden = true; });
+  $('resultsBtn').addEventListener('click', () => { renderResults(); $('resultsDrawer').hidden = !$('resultsDrawer').hidden; });
+  $('closeDrawerBtn').addEventListener('click', () => { $('resultsDrawer').hidden = true; });
+  $('clearResBtn').addEventListener('click', () => { S.results = []; store.set('ted.results', []); renderResults(); });
+  $('copyCsvBtn').addEventListener('click', () => {
+    const text = csv(), msg = $('copyMsg'); msg.hidden = false;
+    const fallback = () => { const box = $('csvBox'); box.hidden = false; box.value = text; box.focus(); box.select(); msg.textContent = 'Select all and copy'; };
+    try { navigator.clipboard.writeText(text).then(() => { msg.textContent = 'Copied ' + S.results.length + ' runs'; }, fallback); } catch (e) { fallback(); }
+  });
+  $('trafficBody').addEventListener('click', (e) => {
+    const tr = e.target.closest('tr.pick'); if (!tr || S.scenario !== 'live') return;
+    S.adopt = S.adopt === tr.dataset.id ? null : tr.dataset.id;
+  });
+
+  // ---------------------------------------------------------------- live ADS-B + runway station (only when served by server.py)
+  function buildLiveScenario() {
+    const ap = S.live.airport; const env = { fieldElev: ap.elevFt * FT, runway: null, hills: [], terrain: () => ap.elevFt * FT };
+    const own = CA.makeAircraft({ id: 'OWN', label: 'You', kind: 'ga', e: -9000, n: -6000, u: (ap.elevFt + 3000) * FT, psi: 55, V: 115 * KT });
+    const traffic = [];
+    for (const a of S.live.ac.values()) traffic.push(a);
+    return { key: 'live', env, own, traffic, duration: 900, meta: scenarioMeta('live') };
+  }
+  // ---------------------------------------------------------------- live model planes (tabletop.py)
+  function buildTabletopScenario() {
+    const env = { fieldElev: 0, runway: null, hills: [], terrain: () => 0 };
+    const own = CA.makeAircraft({ id: 'OWN', label: 'Our plane', kind: 'model', e: 0, n: 0, u: 1000 * FT, psi: 0, V: 60 });
+    const traffic = [];
+    if (S.tt) for (const a of S.tt.others.values()) traffic.push(a);
+    return { key: 'tabletop', env, own, traffic, duration: 1e9 };
+  }
+  function applyTabletopState(ac, d) {
+    Object.assign(ac, {
+      e: d.e, n: d.n, u: Math.max(0, d.alt_ft) * FT, psi: d.psi, V: Math.max(0, d.gs_kt) * KT,
+      vs: d.vs_fpm * FPM, vsCmd: d.vs_fpm * FPM, omega: d.omega, omegaCmd: d.omega, noseDeg: d.nose,
+    });
+    if (d.roll !== null && d.roll !== undefined) { ac.rollDeg = d.roll; ac.pitchDeg = d.pitch; }
+    else { delete ac.rollDeg; delete ac.pitchDeg; }
+  }
+  async function fetchTabletop() {
+    if (!S.tabletop || S.scenario !== 'tabletop' || !sim) return;
+    try {
+      const r = await fetch('/api/tabletop', { cache: 'no-store' }); const d = await r.json();
+      S.tt = S.tt || { others: new Map() };
+      S.tt.timeScale = d.time_scale || 4;
+      let ownSeen = false; const seen = new Set();
+      for (const a of d.aircraft) {
+        if (a.age > 1.5) continue;
+        if (a.role === 'own') { applyTabletopState(sim.own, a); ownSeen = true; continue; }
+        if (a.role === 'runway') continue;
+        const id = 'M' + a.id; seen.add(id);
+        let ac = S.tt.others.get(id);
+        if (!ac) { ac = CA.makeAircraft({ id, label: a.label || ('Plane ' + a.id), kind: 'model', e: a.e, n: a.n, u: a.alt_ft * FT, psi: a.psi, V: a.gs_kt * KT }); S.tt.others.set(id, ac); }
+        applyTabletopState(ac, a);
+        if (!sim.traffic.includes(ac)) sim.traffic.push(ac);
+      }
+      for (const [id, ac] of S.tt.others) if (!seen.has(id)) { sim.traffic = sim.traffic.filter((x) => x !== ac); }
+      S.ttMode = d.mode || 'camera'; if (d.buzzer_cm !== undefined && document.activeElement !== $('buzzCm')) $('buzzCm').value = d.buzzer_cm; renderRaw(d.raw); if (S.ttMode === 'ultrasonic' && $('zeroBtn')) $('zeroBtn').textContent = 'Zero IMU';
+      S.wf = d.advisory && d.advisory.on ? d.advisory : null; renderWf();
+      if (sim && sim.external) {
+        sim.forceLevel = S.wf ? (S.wf.level >= 2 ? 3 : S.wf.level === 1 ? 2 : 0) : 0;
+        // the laptop flies the takeover; the dashboard only shows it
+        const nodeAuto = !!(S.wf && S.wf.node && S.wf.node.auto);
+        if (nodeAuto && !sim.autoAvoid) {
+          const reason = (S.wf.node.auto_reason) || 'pilot did not respond';
+          sim.autoAvoid = { since: sim.t, reason };
+          const d = sim.plan && sim.plan.best ? CA.describe(sim.plan.best, sim.own) : { voice: '' };
+          sim.emit('auto', 'Auto avoid engaged: ' + reason, { voiceFull: 'Auto avoid. ' + d.voice, voiceTraffic: null });
+        } else if (!nodeAuto && sim.autoAvoid) {
+          sim.autoAvoid = null;
+          sim.emit('autoOff', 'You have control.', { voiceFull: 'You have control.', voiceTraffic: null });
+        }
+        postPlan();
+      }
+      S.ttFeed = { ownSeen, n: d.aircraft.length, imu: d.imu, zeroed: d.zeroed, err: d.zeroed ? '' : 'Click Zero table with both planes flat on the table.' };
+    } catch (e) { S.ttFeed = { ownSeen: false, err: 'tabletop.py is not answering' }; }
+    updateChips();
+  }
+
+  function kindFromCat(cat) { if (!cat) return 'ga'; if (cat === 'A7') return 'helo'; if (/^A[3-6]$/.test(cat)) return 'jet'; if (/^C[1-3]$/.test(cat)) return 'truck'; return 'ga'; }
+  async function fetchFeed() {
+    if (!S.served || S.scenario !== 'live' || !S.live) return;
+    const ap = S.live.airport;
+    try {
+      const r = await fetch('/api/traffic?lat=' + ap.lat + '&lon=' + ap.lon + '&dist=25', { cache: 'no-store' });
+      const d = await r.json(); if (!r.ok) throw new Error(d.error || r.status);
+      const cosLat = Math.cos(ap.lat * D2R), seen = new Set();
+      for (const t of d.ac) {
+        if (t.lat === null || t.lon === null || t.alt_ft === null) continue;
+        const id = t.hex; seen.add(id);
+        const e = (t.lon - ap.lon) * 111320 * cosLat, n = (t.lat - ap.lat) * 110540;
+        let a = S.live.ac.get(id);
+        const kind = t.on_ground ? 'truck' : kindFromCat(t.category);
+        if (!a) { a = CA.makeAircraft({ id, label: (t.flight || id).trim(), kind, e, n, u: t.alt_ft * FT, psi: t.track || 0, V: (t.gs_kt || 0) * KT, vsFpm: t.vs_fpm || 0 }); S.live.ac.set(id, a); if (sim && sim.scn.key === 'live') sim.traffic.push(a); }
+        Object.assign(a, { e, n, u: t.on_ground ? ap.elevFt * FT : t.alt_ft * FT, psi: t.track || a.psi, V: (t.gs_kt || 0) * KT, vs: (t.vs_fpm || 0) * FPM, vsCmd: (t.vs_fpm || 0) * FPM, omega: 0, omegaCmd: 0, label: (t.flight || id).trim(), kind });
+      }
+      for (const [id, a] of S.live.ac) if (!seen.has(id)) { S.live.ac.delete(id); if (sim) sim.traffic = sim.traffic.filter((x) => x !== a); }
+      S.feed = { ok: true, src: d.source, n: d.ac.length };
+    } catch (e) { S.feed = { ok: false, err: String(e.message || e) }; }
+    updateChips();
+  }
+  async function pollStation() {
+    if (!S.served) return;
+    try {
+      const r = await fetch('/api/runway', { cache: 'no-store' }); const d = await r.json();
+      S.station = Object.assign({}, d, { fresh: d.age !== null && d.age < 3 });
+    } catch (e) { S.station = null; }
+    if (sim) sim.runwayExternal = S.station;
+    // tell the runway station when our airplane is on final, so the physical runway goes "active"
+    try {
+      const f = sim && sim.final ? sim.final : null;
+      await fetch('/api/state', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ on_final: !!(f && f.onFinal && f.distNm < 4 && !sim.attract), dist_nm: f ? +f.distNm.toFixed(2) : null, eta_s: f && isFinite(f.etaS) ? +f.etaS.toFixed(1) : null, scenario: S.scenario }) });
+    } catch (e) { /* server gone */ }
+    updateChips();
+  }
+  // ---------------------------------------------------------------- alerting workflow (tabletop.py + collision_node)
+  function renderRaw(r) {
+    const panel = $('rawPanel');
+    panel.hidden = !r; $('app').classList.toggle('rawmode', !!r && S.ttMode === 'ultrasonic');
+    if (!r) return;
+    const link = $('rawLink');
+    link.textContent = !r.connected ? 'no board' : r.alive ? (r.port || '') : 'silent';
+    const dist = $('rawDist');
+    if (r.us_cm) { dist.textContent = r.us_cm + ' cm'; dist.className = 'big' + (r.us_cm < 30 ? ' near' : ''); }
+    else { dist.textContent = r.us_fresh ? 'no echo' : (r.rates && r.rates.U > 0 ? 'no echo' : 'no sensor data'); dist.className = 'big none'; }
+    const cr = r.closing_cm_s;
+    const motion = cr === null || cr === undefined ? '' : cr === 0 ? ' · steady' : cr > 0 ? ' · approaching ' + cr.toFixed(0) + ' cm/s' : ' · moving away ' + (-cr).toFixed(0) + ' cm/s';
+    $('rawDistSub').textContent = r.us_fresh ? 'TF-Luna raw ' + (r.us_raw ? r.us_raw + ' cm' : 'none') + ' · filtered' + motion : 'no LiDAR data: check TF-Luna 5V, GND, SDA/SCL and I²C mode';
+    // sparkline: last 10 s, 0 to 200 cm, dashed line at 30 cm
+    const c = $('rawSpark'), g = c.getContext('2d'), W = c.width, H = c.height;
+    g.clearRect(0, 0, W, H);
+    const y = (cm) => H - 6 - Math.min(200, cm) / 200 * (H - 12), x = (t) => W + t / 10 * W;
+    g.strokeStyle = 'rgba(255,182,39,0.5)'; g.setLineDash([6, 6]); g.beginPath(); g.moveTo(0, y(30)); g.lineTo(W, y(30)); g.stroke(); g.setLineDash([]);
+    g.fillStyle = '#5d7282'; g.font = '18px ui-monospace, monospace'; g.fillText('200', 6, 22); g.fillText('30', 6, y(30) - 6);
+    const line = (idx, color, w) => {
+      g.strokeStyle = color; g.lineWidth = w; g.beginPath(); let pen = false;
+      for (const h of (r.us_hist || [])) { const cm = h[idx]; if (cm === null || cm === undefined) { pen = false; continue; } if (!pen) { g.moveTo(x(h[0]), y(cm)); pen = true; } else g.lineTo(x(h[0]), y(cm)); }
+      g.stroke();
+    };
+    line(2, 'rgba(160,180,195,0.45)', 1.5);      // raw sensor reading
+    line(1, '#3ddc84', 3);                        // filtered: what the system uses
+    const imu = $('rawImu'); imu.textContent = r.imu_ok ? 'roll ' + r.roll + '°  pitch ' + r.pitch + '°  yaw ' + r.yaw + '°' + (r.zeroed === false ? '  (not zeroed)' : '') : 'no IMU data from the ESP32'; imu.className = r.imu_ok ? '' : 'bad';
+    const why = { '-': 'no escalation (distance beep only)', '3': 'BEEPING: resolution not followed (pitch the nose)', '4': 'BEEPING fast: press ACK', 'A': 'ticking: automatic avoid flying', 'P': 'ON: closer than 30 cm (no laptop)', '?': 'old sketch: reason unknown' };
+    const bz = $('rawBuzz'); bz.textContent = r.buzz === null || r.buzz === undefined ? (r.connected ? 'board sends no status (draft2.ino?)' : '-') : (why[r.buzz] || r.buzz); bz.className = r.buzz && r.buzz !== '-' ? 'warn' : 'ok';
+    const stg = ['clear', 'traffic advisory', 'resolution', 'not following', 'ACK required'];
+    $('rawStage').textContent = r.stage === null || r.stage === undefined ? '-' : stg[r.stage] + (r.ack ? ' · acknowledged' : '') + (r.stage >= 2 ? (r.comply ? ' · following' : ' · not following') : '');
+    const rt = r.rates || {}; const rr = $('rawRates');
+    rr.textContent = 'IMU ' + (rt.A || 0) + ' · LiDAR ' + (rt.U || 0) + ' · status ' + (rt.S || 0);
+    rr.className = (rt.A || 0) < 20 || (rt.U || 0) < 5 ? 'warn' : '';
+  }
+  function wfActive() { return !!(S.tabletop && S.scenario === 'tabletop' && S.wf && S.wf.on); }
+  let wfSaid = 0;
+  function wfSpeak(say) {
+    if (!say || !say.id || say.id === wfSaid) return;
+    wfSaid = say.id;
+    if (!S.sound || !('speechSynthesis' in window)) return;
+    try {
+      if (say.prio >= 3) window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(say.text);
+      u.rate = say.loud ? 1.25 : 1.08; u.pitch = say.loud ? 1.2 : 1.0; u.volume = 1;
+      window.speechSynthesis.speak(u);
+      if (say.loud) { const u2 = new SpeechSynthesisUtterance(say.text); u2.rate = 1.3; u2.pitch = 1.25; window.speechSynthesis.speak(u2); }
+    } catch (e) { /* no speech */ }
+  }
+  function renderWf() {
+    const box = $('wfBox'), w = S.wf;
+    box.hidden = !wfActive();
+    if (!wfActive()) return;
+    wfSpeak(w.say);
+    const n = w.node || {}, it = w.intruder, st = w.stage || 0;
+    const set = (id, on, extra, done) => { const e = $(id); e.className = (on ? 'on ' + (extra || '') : '') + (done && !on ? 'done' : ''); };
+    set('wfS1', w.level === 1, '', w.level >= 2);
+    set('wfS2', w.level === 2 && st <= 2, 'red', st > 2);
+    set('wfS3', st >= 3, 'red', false);
+    set('wfS4', st >= 4 && !n.ack, 'red', !!n.ack);
+    set('wfS5', !!n.auto, 'mag', false);
+    const th = w.thresholds || {};
+    $('wfTau').textContent = (w.tau === null ? 'not closing' : w.tau.toFixed(0) + ' s') + '  (TA ' + th.ta + ' s, RA ' + th.ra + ' s)';
+    $('wfRange').textContent = it ? it.range_nm.toFixed(2) + ' nm via ' + it.range_src + (w.us_cm ? ' · nose sensor ' + w.us_cm + ' cm' : '') + ' · closing ' + (it.closure_kt || 0) + ' kt' : 'no traffic';
+    if (it) {
+      const eq = it.equipped === true ? 'EQUIPPED (radio)' : it.equipped === false ? 'not equipped (ADS-B Out only)' : (S.ttMode === 'ultrasonic' ? 'no system on board · seen only by our nose sensor (radar stand-in)' : 'no system on board · tracked by camera (ADS-B / radar stand-in)');
+      const tr = it.trend > 0 ? 'climbing' : it.trend < 0 ? 'descending' : 'level';
+      $('wfOther').textContent = it.label + ' · ' + eq + (S.ttMode === 'ultrasonic' ? ' · straight ahead, altitude unknown' : ' · ' + tr + ' (' + it.trend_src + ') · ' + (it.dalt_ft > 0 ? '+' : '') + it.dalt_ft + ' ft');
+    } else $('wfOther').textContent = '-';
+    const s = w.sense || {}, V = { C: 'climb', D: 'descend', H: 'hold' }, T = { R: 'right', L: 'left', S: 'straight' };
+    const negWords = { P: 'proposal sent, waiting for ACK', A: 'proposal acknowledged, senses opposite', U: 'no answer, fixed rule applied', R: 'answered their proposal', '-': 'unilateral' };
+    $('wfSense').textContent = w.level >= 2 || st >= 2 ? V[s.vert] + ', turn ' + T[s.turn] + ' · ' + (s.by === 'tie-break' ? 'tie-break: ' : '') + (negWords[s.neg] || s.by || '') + (s.why && s.by !== 'tie-break' ? ' · ' + s.why : '') : '-';
+    $('wfPilot').textContent = !w.node_connected ? 'our plane\'s Arduino not connected (no escalation)' : st >= 2 ? (n.comply ? 'following the advisory (IMU)' : 'NOT following (IMU)') + (st >= 4 ? ' · stick shaker' : st >= 3 ? ' · buzzer' : '') + (n.ack ? ' · acknowledged' : '') : 'monitoring';
+    $('wfPattern').textContent = (w.pattern ? 'IN TRAFFIC PATTERN: tighter thresholds' : 'en route') + ' · ' + w.pattern_why;
+    const r = w.radio || {}, peers = Object.entries(r.peers || {});
+    $('wfRadio').textContent = (r.mode || 'none') + (peers.length ? ' · ' + peers.map(([id, p]) => 'node ' + id + (p.eq ? ' (equipped)' : '') + ' pitch ' + p.pitch + '°' + (r.mode === 'LoRa' ? ' ' + p.rssi + ' dBm' : '')).join(', ') : ' · nothing heard') + (r.relay ? ' · relayed ' + r.relay.sent + ', dropped ' + r.relay.dropped : '');
+    if (n.policy && autoSel.value !== n.policy && document.activeElement !== autoSel) { autoSel.value = n.policy; S.auto = n.policy; }
+    const ap = $('wfAp'); ap.textContent = 'Autopilot: ' + (n.auto ? 'AVOIDING' : n.ap ? 'engaged' : 'off'); ap.className = 'btn' + (n.ap ? ' apon' : ''); ap.setAttribute('aria-pressed', n.ap ? 'true' : 'false');
+    $('wfAck').className = 'btn ack' + (st >= 4 && !n.ack ? ' urgent' : '');
+    const log = (w.events || []).slice(-5).join('\n'); if ($('wfLog').textContent !== log) $('wfLog').textContent = log;
+  }
+  // live board: send the collision-cone CBF-QP plan to demo.py, which flies it when the autopilot has control
+  let planPostT = 0;
+  function postPlan() {
+    const now = performance.now();
+    if (now - planPostT < 240 || !sim || !S.wf || S.wf.level < 2) return;
+    const pl = sim.plan, b = pl && pl.best;
+    if (!b || !b.branch || pl.algo !== 'cbf') return;
+    planPostT = now;
+    const k = Math.round((sim.t - (sim.planT || sim.t)) / CA.PLAN.dt);
+    const cmd = CA.cbfCommand(sim.own, pl.intrs, b.branch, { omega: 0, vsCmd: 0 }, k);
+    const d = CA.describe(b, sim.own);
+    wfPost('/api/plan', {
+      branch: b.branch, text: d.text, voice: d.voice, sMin: +b.sMin.toFixed(2), durS: +b.durS.toFixed(1),
+      bankDeg: Math.round(b.cmd.bankDeg), psiEnd: Math.round(b.psi), vsFpm: b.vs,
+      cmd: { omegaDeg: +cmd.omegaDeg.toFixed(2), vsFpm: Math.round(cmd.vsCmd / FT * 60) },
+      lastSafe: sim.lastSafe === null || sim.lastSafe === undefined ? null : +sim.lastSafe.toFixed(1),
+      resolving: sim.resolving(), slack: b.slack > 1e-3, autoDue: sim.autoDue || null,
+    });
+  }
+  function wfPost(path, body) { return fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) }).catch(() => {}); }
+  $('wfAck').addEventListener('click', () => wfPost('/api/ack'));
+  $('wfAp').addEventListener('click', () => { const on = !(S.wf && S.wf.node && S.wf.node.ap); wfPost('/api/ap', { on }); });
+  $('buzzSet').addEventListener('click', async () => { const cm = Math.max(0, Math.min(800, +$('buzzCm').value || 0)); $('buzzCm').value = cm; await wfPost('/api/buzzer', { cm }); });
+  $('wfLoss').addEventListener('change', (e) => wfPost('/api/radio', { loss: +e.target.value }));
+  window.addEventListener('keydown', (e) => { if (wfActive() && (e.key === 'k' || e.key === 'K') && !e.repeat) wfPost('/api/ack'); });
+
+  function updateChips() {
+    const fc = $('feedChip'), sc = $('stationChip');
+    fc.hidden = sc.hidden = !S.served;
+    if (S.tabletop && S.scenario === 'tabletop') {
+      const f = S.ttFeed || {};
+      if (S.ttMode === 'ultrasonic') { const cm = S.wf && S.wf.us_cm; fc.className = 'chip ' + (cm ? 'warn' : 'ok'); fc.lastChild.textContent = 'Nose sensor: ' + (cm ? cm + ' cm' : 'nothing ahead'); }
+      else { fc.className = 'chip ' + (f.ownSeen ? 'ok' : 'bad'); fc.lastChild.textContent = 'Camera: ' + (f.n || 0) + ' plane' + ((f.n || 0) === 1 ? '' : 's') + ' in view' + (f.zeroed ? '' : ', not zeroed'); }
+      const imu = f.imu || {};
+      sc.className = 'chip ' + (imu.ok ? 'ok' : 'warn'); sc.lastChild.textContent = imu.ok ? 'IMU: roll ' + Math.round(imu.roll) + '°, pitch ' + Math.round(imu.pitch) + '°' : 'IMU: ' + (imu.port ? 'no data' : 'not connected');
+      return;
+    }
+    if (!S.served) { fc.className = 'chip'; fc.lastChild.textContent = 'ADS-B: scripted scenarios'; sc.className = 'chip'; sc.lastChild.textContent = 'Runway station: run server.py'; return; }
+    if (S.scenario === 'live' && S.feed) { fc.className = 'chip ' + (S.feed.ok ? 'ok' : 'bad'); fc.lastChild.textContent = S.feed.ok ? 'ADS-B: ' + S.feed.n + ' aircraft (' + S.feed.src + ')' : 'ADS-B: ' + S.feed.err.slice(0, 40); }
+    else { fc.className = 'chip ok'; fc.lastChild.textContent = 'ADS-B: live feed ready'; }
+    const st = S.station;
+    if (!st || !st.fresh) { sc.className = 'chip'; sc.lastChild.textContent = 'Runway station: offline'; }
+    else { sc.className = 'chip ' + (st.state === 'INCURSION' ? 'bad' : st.state === 'CLEAR' ? 'ok' : 'warn'); sc.lastChild.textContent = 'Runway station: ' + st.state; }
+  }
+  async function detectServer() {
+    $('offlineStrip').hidden = false;                   // shown until demo.py answers
+    if (!/^https?:$/.test(location.protocol)) return;
+    try {
+      const r = await fetch('/api/ping', { cache: 'no-store' }); if (!r.ok) return;
+      const d = await r.json(); if (!d || !d.ok) return;
+      S.served = true;
+      if (d.mode === 'ultrasonic') S.liveOnly = true;     // demo.py: the board is the only data source
+      if (d.tabletop) wfPost('/api/autopolicy', { mode: autoSel.value });   // the menu's choice applies to live mode too
+      $('offlineStrip').hidden = !!d.tabletop;
+      const lb = $('liveBadge'); lb.className = d.tabletop ? 'on' : ''; lb.textContent = d.tabletop ? 'LIVE · BOARD DATA' : 'PRACTICE (made-up traffic)';
+      if (d.tabletop) { S.tabletop = true; S.scenario = 'tabletop'; S.tt = { others: new Map(), timeScale: 4 }; if (S.view === 'chase' && !store.get('ted.view', null)) { S.view = 'overview'; setSeg('viewSeg', 'view', 'overview'); } }
+      fillScenarios(); updateChips();
+      if (d.tabletop) { resetAttract(); setInterval(fetchTabletop, 66); setInterval(() => postIntent(performance.now()), 150); }
+      setInterval(pollStation, 1000); setInterval(fetchFeed, 2000);
+    } catch (e) { /* not served by server.py: scripted scenarios only */ }
+  }
+
+  // ---------------------------------------------------------------- main loop
+  function resize() {
+    const r = canvas.getBoundingClientRect(); const w = Math.max(1, r.width), h = Math.max(1, r.height);
+    renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+  }
+  window.addEventListener('resize', resize);
+
+  let last = performance.now();
+  function frame(now) {
+    const rawDt = Math.min(1.0, (now - last) / 1000); last = now;
+    const dtReal = Math.min(0.1, rawDt);
+    readInput();
+    if (S.adopt && sim.scn.key === 'live') { const a = sim.traffic.find((x) => x.id === S.adopt); if (a) Object.assign(sim.own, { e: a.e, n: a.n, u: a.u, psi: a.psi, V: a.V, vs: a.vs, omega: 0, label: a.label }); }
+    if (S.countdown > 0) { S.countdown -= rawDt; showCountdown(); }
+    else if (!S.paused) {
+      // live models run on wall-clock time (scaled), scripted scenarios on frame time
+      let rem = sim.external ? rawDt * ((S.tt && S.tt.timeScale) || 4) : dtReal * S.speed;
+      while (rem > 1e-6) { const h = Math.min(rem, 1 / 60); sim.step(h); rem -= h; }
+      if (sim.attract && sim.ended) resetAttract();
+    }
+    handleEvents();
+    update3D();
+    hudTimer -= dtReal; if (hudTimer <= 0) { hudTimer = 0.1; updateHud(); drawPlan(); }
+    renderLights(now);
+    renderer.render(scene, camera);
+    requestAnimationFrame(frame);
+  }
+
+  // boot
+  S.scenario = store.get('ted.scenario', 'headon'); if (!SCN.SCENARIOS.find((s) => s.key === S.scenario)) S.scenario = 'headon';
+  setMode(store.get('ted.mode', 'full'));
+  { const v = store.get('ted.view', null); if (['chase', 'overview', 'top'].includes(v)) { S.view = v; setSeg('viewSeg', 'view', v); } }
+  setUi(S.ui); setSeg('styleSeg', 'style', S.lightStyle);
+  fillScenarios(); renderResults(); updateChips();
+  resize(); resetAttract(); updateHud(); drawPlan();
+  window.__ted = { S, get sim() { return sim; }, panelEdge: () => panelEdge, ownScreen: () => { if (!ownObj) return null; const v = ownObj.position.clone().project(camera); const r = canvas.getBoundingClientRect(); return { x: Math.round(r.left + (v.x + 1) / 2 * r.width), y: Math.round(r.top + (1 - v.y) / 2 * r.height) }; }, startRun, resetAttract, setMode, setUi, currentIntent, step: (s) => { S.countdown = 0; showCountdown(); for (let t = 0; t < s; t += 1 / 30) sim.step(1 / 30); } };
+  requestAnimationFrame(frame);
+  detectServer();
+})();
+
+</script>
+
+</body>
+</html>
