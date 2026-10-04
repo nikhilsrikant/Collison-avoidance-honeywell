@@ -1,0 +1,11 @@
+# demo.py (no camera: IMU + ultrasonic) needs only this:
+pyserial>=3.5
+# mpu6500_3d.py (3D airliner window) also needs:
+vpython>=7.6
+# tabletop.py (camera tracking version) also needs:
+# opencv-python>=4.8
+# numpy>=1.24
+# optional: AI detector (python runway_guard.py --detector yolo)
+# ultralytics>=8.0
+# optional: spoken alerts at the runway station (--voice)
+# pyttsx3>=2.90
